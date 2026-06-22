@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.evaluator.danger_zone_evaluator import DangerZoneEvaluator
+from app.rules.danger_zone_evaluator import DangerZoneEvaluator
 from app.tracker.bytetrack_tracker import Track
 
 
