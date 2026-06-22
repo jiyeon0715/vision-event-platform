@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from ast import literal_eval
 from typing import Any, Mapping
 
 try:
@@ -42,8 +43,26 @@ class TrackerSettings:
 
 @dataclass(frozen=True)
 class EventSettings:
-    danger_zone_threshold: float
-    cooldown_seconds: int
+    danger_zone: tuple[tuple[float, float], ...] | str = ()
+    threshold_sec: float | None = None
+    notify_interval_sec: float | None = None
+    danger_zone_threshold: float | None = None
+    cooldown_seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "danger_zone", _normalize_polygon(self.danger_zone))
+        if self.threshold_sec is None:
+            object.__setattr__(
+                self,
+                "threshold_sec",
+                float(self.danger_zone_threshold or 0.0),
+            )
+        if self.notify_interval_sec is None:
+            object.__setattr__(
+                self,
+                "notify_interval_sec",
+                float(self.cooldown_seconds or 0.0),
+            )
 
 
 @dataclass(frozen=True)
@@ -103,6 +122,18 @@ def _parse_scalar(value: str) -> Any:
         return float(value)
     except ValueError:
         return value
+
+
+def _normalize_polygon(value: object) -> tuple[tuple[float, float], ...]:
+    if isinstance(value, str):
+        value = literal_eval(value)
+
+    points = []
+    for point in value:  # type: ignore[union-attr]
+        x, y = point
+        points.append((float(x), float(y)))
+
+    return tuple(points)
 
 
 def _section(config_data: Mapping[str, Any], section_name: str) -> Mapping[str, Any]:

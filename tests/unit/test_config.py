@@ -20,6 +20,9 @@ tracker:
   max_age: 20
   min_hits: 2
 event:
+  danger_zone: [[0, 0], [10, 0], [10, 10], [0, 10]]
+  threshold_sec: 3
+  notify_interval_sec: 20
   danger_zone_threshold: 0.9
   cooldown_seconds: 15
 """.lstrip(),
@@ -40,6 +43,14 @@ def test_load_settings_from_yaml(tmp_path: Path) -> None:
     assert settings.yolo.confidence_threshold == 0.75
     assert settings.tracker.type == "bytetrack"
     assert settings.tracker.max_age == 20
+    assert settings.event.danger_zone == (
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 10.0),
+        (0.0, 10.0),
+    )
+    assert settings.event.threshold_sec == 3
+    assert settings.event.notify_interval_sec == 20
     assert settings.event.cooldown_seconds == 15
 
 

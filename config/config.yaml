@@ -18,3 +18,6 @@ tracker:
 event:
   danger_zone_threshold: 0.8
   cooldown_seconds: 60
+  danger_zone: [[100, 100], [500, 100], [500, 500], [100, 500]]
+  threshold_sec: 3
+  notify_interval_sec: 60
