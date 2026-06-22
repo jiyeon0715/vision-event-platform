@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import Protocol
+
+from sqlalchemy.orm import Session, sessionmaker
+
+from app.database.models import Event as EventModel
+from app.database.session import get_session_factory
+
+
+class EventRecord(Protocol):
+    event_type: str
+    track_id: int
+    timestamp: float
+    message: str
+
+
+class EventRepository:
+    """Persist generated pipeline events."""
+
+    def __init__(
+        self,
+        session: Session | None = None,
+        session_factory: sessionmaker[Session] | None = None,
+    ) -> None:
+        self._session = session
+        self._session_factory = (
+            session_factory
+            if session_factory is not None
+            else None
+            if session is not None
+            else get_session_factory()
+        )
+
+    def save(self, event: EventRecord) -> EventModel:
+        return self.save_many([event])[0]
+
+    def save_many(self, events: Iterable[EventRecord]) -> list[EventModel]:
+        event_list = list(events)
+        if not event_list:
+            return []
+
+        models = [
+            EventModel(
+                event_type=event.event_type,
+                track_id=event.track_id,
+                timestamp=event.timestamp,
+                message=event.message,
+            )
+            for event in event_list
+        ]
+
+        if self._session is not None:
+            self._session.add_all(models)
+            self._session.commit()
+            return models
+
+        if self._session_factory is None:
+            raise RuntimeError("EventRepository requires a session or session factory")
+
+        with self._session_factory() as session:
+            session.add_all(models)
+            session.commit()
+            for model in models:
+                session.refresh(model)
+            return models

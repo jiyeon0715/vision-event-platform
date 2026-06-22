@@ -22,6 +22,11 @@ class DangerZoneRuleEvaluator(Protocol):
         ...
 
 
+class EventWriter(Protocol):
+    def save_many(self, events: Sequence[Event]) -> object:
+        ...
+
+
 class VisionEventPipeline:
     """Coordinates frame detection, tracking, and rule evaluation."""
 
@@ -30,12 +35,22 @@ class VisionEventPipeline:
         detector: Detector | None = None,
         tracker: Tracker | None = None,
         danger_zone_rule: DangerZoneRuleEvaluator | None = None,
+        event_repository: EventWriter | None = None,
     ) -> None:
         self._detector = detector or YoloDetector()
         self._tracker = tracker or ByteTrackTracker()
         self._danger_zone_rule = danger_zone_rule or DangerZoneRule()
+        self._event_repository = event_repository or _default_event_repository()
 
     def process_frame(self, frame: object, timestamp: float) -> list[Event]:
         detections = self._detector.detect(frame)
         tracks = self._tracker.update(detections)
-        return list(self._danger_zone_rule.evaluate(tracks, timestamp))
+        events = list(self._danger_zone_rule.evaluate(tracks, timestamp))
+        self._event_repository.save_many(events)
+        return events
+
+
+def _default_event_repository() -> EventWriter:
+    from app.repositories.event_repository import EventRepository
+
+    return EventRepository()

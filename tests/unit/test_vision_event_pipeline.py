@@ -78,6 +78,14 @@ class MockDangerZoneRule:
         return self.events
 
 
+class MockEventRepository:
+    def __init__(self) -> None:
+        self.save_many_calls: list[list[Event]] = []
+
+    def save_many(self, events: list[Event]) -> None:
+        self.save_many_calls.append(events)
+
+
 def test_process_frame_runs_detector_tracker_and_rule_in_order() -> None:
     recorder = CallRecorder(calls=[])
     frame = object()
@@ -88,10 +96,12 @@ def test_process_frame_runs_detector_tracker_and_rule_in_order() -> None:
     detector = MockDetector(detections=detections, recorder=recorder)
     tracker = MockTracker(tracks=tracks, recorder=recorder)
     danger_zone_rule = MockDangerZoneRule(events=events, recorder=recorder)
+    event_repository = MockEventRepository()
     pipeline = VisionEventPipeline(
         detector=detector,
         tracker=tracker,
         danger_zone_rule=danger_zone_rule,
+        event_repository=event_repository,
     )
 
     result = pipeline.process_frame(frame, timestamp)
@@ -101,6 +111,7 @@ def test_process_frame_runs_detector_tracker_and_rule_in_order() -> None:
     assert detector.detect_calls == [frame]
     assert tracker.update_calls == [detections]
     assert danger_zone_rule.evaluate_calls == [(tracks, timestamp)]
+    assert event_repository.save_many_calls == [events]
 
 
 def test_process_frame_returns_empty_events_when_rule_emits_none() -> None:
@@ -108,20 +119,24 @@ def test_process_frame_returns_empty_events_when_rule_emits_none() -> None:
     detector = MockDetector(detections=[], recorder=recorder)
     tracker = MockTracker(tracks=[], recorder=recorder)
     danger_zone_rule = MockDangerZoneRule(events=[], recorder=recorder)
+    event_repository = MockEventRepository()
     pipeline = VisionEventPipeline(
         detector=detector,
         tracker=tracker,
         danger_zone_rule=danger_zone_rule,
+        event_repository=event_repository,
     )
 
     assert pipeline.process_frame(frame=object(), timestamp=1.0) == []
     assert recorder.calls == ["detect", "update", "evaluate"]
+    assert event_repository.save_many_calls == [[]]
 
 
 def test_pipeline_constructs_default_components() -> None:
     detector = MagicMock()
     tracker = MagicMock()
     danger_zone_rule = MagicMock()
+    event_repository = MagicMock()
 
     with (
         patch(
@@ -136,12 +151,18 @@ def test_pipeline_constructs_default_components() -> None:
             "app.pipeline.vision_event_pipeline.DangerZoneRule",
             return_value=danger_zone_rule,
         ) as rule_cls,
+        patch(
+            "app.pipeline.vision_event_pipeline._default_event_repository",
+            return_value=event_repository,
+        ) as default_repository,
     ):
         pipeline = VisionEventPipeline()
 
     assert pipeline._detector is detector
     assert pipeline._tracker is tracker
     assert pipeline._danger_zone_rule is danger_zone_rule
+    assert pipeline._event_repository is event_repository
     detector_cls.assert_called_once_with()
     tracker_cls.assert_called_once_with()
     rule_cls.assert_called_once_with()
+    default_repository.assert_called_once_with()

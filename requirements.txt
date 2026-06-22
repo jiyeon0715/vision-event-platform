@@ -4,6 +4,7 @@ fastapi
 uvicorn[standard]
 pydantic
 PyYAML
+SQLAlchemy
 
 # Vision/tracking runtime dependencies.
 opencv-python

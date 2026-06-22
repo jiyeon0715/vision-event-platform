@@ -3,5 +3,6 @@
 fastapi
 pydantic
 PyYAML
+SQLAlchemy
 pytest
 httpx
