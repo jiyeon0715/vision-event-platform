@@ -1,0 +1,17 @@
+app:
+  name: vision-event-platform
+  environment: local
+
+api:
+  host: 0.0.0.0
+  port: 8000
+
+database:
+  host: postgres
+  port: 5432
+  name: vision_events
+  user: vision
+
+vision:
+  detector: yolo
+  tracker: bytetrack

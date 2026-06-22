@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pydantic
+PyYAML
+opencv-python
+ultralytics
+bytetracker
+psycopg[binary]
+pytest
+httpx
