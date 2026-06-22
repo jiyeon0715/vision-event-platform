@@ -79,6 +79,16 @@ Health Check
 GET http://localhost:8000/health
 ```
 
+Run the local video pipeline against a video file:
+
+```bash
+python scripts/run_video.py /path/to/video.mp4
+```
+
+The runner reads frames with OpenCV, passes each frame through
+`VisionEventPipeline.process_frame()`, prints any emitted events to the console,
+and exits gracefully when it reaches the end of the file.
+
 ## Tests
 
 GitHub Actions installs the lean unit-test dependency set from `requirements-ci.txt`.
