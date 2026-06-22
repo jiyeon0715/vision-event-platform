@@ -27,7 +27,7 @@ class PersonState:
     is_inside: bool
 
 
-class DangerZoneEvaluator:
+class DangerZoneRule:
     """Evaluate tracked people against a configured danger zone polygon."""
 
     def __init__(
@@ -157,3 +157,6 @@ def _point_on_segment(point: Point, start: Point, end: Point) -> bool:
         min(x1, x2) - 1e-9 <= x <= max(x1, x2) + 1e-9
         and min(y1, y2) - 1e-9 <= y <= max(y1, y2) + 1e-9
     )
+
+
+DangerZoneEvaluator = DangerZoneRule
