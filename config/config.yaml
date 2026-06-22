@@ -2,16 +2,19 @@ app:
   name: vision-event-platform
   environment: local
 
-api:
-  host: 0.0.0.0
-  port: 8000
-
 database:
-  host: postgres
-  port: 5432
-  name: vision_events
-  user: vision
+  url: postgresql://vision@postgres:5432/vision_events
 
-vision:
-  detector: yolo
-  tracker: bytetrack
+yolo:
+  model_path: models/yolo.pt
+  confidence_threshold: 0.5
+  device: cpu
+
+tracker:
+  type: bytetrack
+  max_age: 30
+  min_hits: 3
+
+event:
+  danger_zone_threshold: 0.8
+  cooldown_seconds: 60
