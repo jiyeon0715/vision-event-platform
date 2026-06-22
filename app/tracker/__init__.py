@@ -1,1 +1,5 @@
-"""Tracking package for future ByteTrack integration."""
+"""Tracking package."""
+
+from app.tracker.bytetrack_tracker import ByteTrackTracker, Track
+
+__all__ = ["ByteTrackTracker", "Track"]

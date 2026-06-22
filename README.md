@@ -63,6 +63,12 @@ FastAPI API
 
 ## Run Locally
 
+Install the full runtime dependency set before running the application:
+
+```bash
+pip install -r requirements.txt
+```
+
 ```bash
 uvicorn main:app --reload
 ```
@@ -71,6 +77,17 @@ Health Check
 
 ```text
 GET http://localhost:8000/health
+```
+
+## Tests
+
+GitHub Actions installs the lean unit-test dependency set from `requirements-ci.txt`.
+The full local runtime stack, including OpenCV, Ultralytics, ByteTrack, and psycopg,
+remains documented in `requirements.txt`.
+
+```bash
+pip install -r requirements-ci.txt
+pytest
 ```
 
 ## Project Status

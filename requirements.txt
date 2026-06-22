@@ -1,10 +1,18 @@
+# Runtime dependencies for local development, Docker, and production-like runs.
+# CI unit tests install requirements-ci.txt to avoid native vision/tracking builds.
 fastapi
 uvicorn[standard]
 pydantic
 PyYAML
+
+# Vision/tracking runtime dependencies.
 opencv-python
 ultralytics
 bytetracker
+
+# Runtime database client.
 psycopg[binary]
+
+# Local test tools.
 pytest
 httpx

@@ -1,5 +1,3 @@
-class ByteTrackTracker:
-    """Placeholder for ByteTrack-based object tracking."""
+from app.tracker.bytetrack_tracker import ByteTrackTracker, Track
 
-    def update(self, detections: list[dict[str, object]]) -> list[dict[str, object]]:
-        raise NotImplementedError("ByteTrack tracking is not implemented yet.")
+__all__ = ["ByteTrackTracker", "Track"]

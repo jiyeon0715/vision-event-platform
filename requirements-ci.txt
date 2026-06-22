@@ -1,0 +1,7 @@
+# Dependencies required for GitHub Actions unit tests.
+# Runtime-heavy vision/tracking packages stay in requirements.txt.
+fastapi
+pydantic
+PyYAML
+pytest
+httpx
