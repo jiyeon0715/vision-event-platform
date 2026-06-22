@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Protocol
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models import Event as EventModel
@@ -35,6 +36,28 @@ class EventRepository:
 
     def save(self, event: EventRecord) -> EventModel:
         return self.save_many([event])[0]
+
+    def list_recent(self, limit: int = 100) -> list[EventModel]:
+        statement = select(EventModel).order_by(EventModel.created_at.desc()).limit(limit)
+
+        if self._session is not None:
+            return list(self._session.scalars(statement).all())
+
+        if self._session_factory is None:
+            raise RuntimeError("EventRepository requires a session or session factory")
+
+        with self._session_factory() as session:
+            return list(session.scalars(statement).all())
+
+    def get(self, event_id: int) -> EventModel | None:
+        if self._session is not None:
+            return self._session.get(EventModel, event_id)
+
+        if self._session_factory is None:
+            raise RuntimeError("EventRepository requires a session or session factory")
+
+        with self._session_factory() as session:
+            return session.get(EventModel, event_id)
 
     def save_many(self, events: Iterable[EventRecord]) -> list[EventModel]:
         event_list = list(events)

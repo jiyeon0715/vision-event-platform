@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 sqlalchemy = pytest.importorskip("sqlalchemy")
@@ -61,3 +63,40 @@ def test_save_many_ignores_empty_event_list() -> None:
 
     assert repository.save_many([]) == []
     assert session.scalars(select(EventModel)).all() == []
+
+
+def test_list_recent_returns_newest_events_first() -> None:
+    session = make_session()
+    repository = EventRepository(session=session)
+    older = EventModel(
+        event_type="danger_zone",
+        track_id=1,
+        timestamp=1.0,
+        message="Older event",
+        created_at=datetime(2026, 6, 22, 10, 0, tzinfo=timezone.utc),
+    )
+    newer = EventModel(
+        event_type="danger_zone",
+        track_id=2,
+        timestamp=2.0,
+        message="Newer event",
+        created_at=datetime(2026, 6, 22, 11, 0, tzinfo=timezone.utc),
+    )
+    session.add_all([older, newer])
+    session.commit()
+
+    events = repository.list_recent(limit=1)
+
+    assert [event.track_id for event in events] == [2]
+
+
+def test_get_returns_event_by_id() -> None:
+    session = make_session()
+    repository = EventRepository(session=session)
+    saved = repository.save(make_event(track_id=99))
+
+    found = repository.get(saved.id)
+
+    assert found is not None
+    assert found.id == saved.id
+    assert found.track_id == 99
