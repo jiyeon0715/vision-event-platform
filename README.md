@@ -89,6 +89,18 @@ The runner reads frames with OpenCV, passes each frame through
 `VisionEventPipeline.process_frame()`, prints any emitted events to the console,
 and exits gracefully when it reaches the end of the file.
 
+Save emitted events to a local SQLite database while still printing JSON lines:
+
+```bash
+python scripts/run_video.py /path/to/video.mp4 --save-events --db-path data/events.db
+```
+
+List saved SQLite events as JSON lines:
+
+```bash
+python scripts/list_events.py --db-path data/events.db
+```
+
 ## Tests
 
 GitHub Actions installs the lean unit-test dependency set from `requirements-ci.txt`.
