@@ -32,6 +32,8 @@ FastAPI API
 - Docker environment
 - PostgreSQL integration skeleton
 - Event processing architecture
+- SQLite event persistence
+- Read-only saved event API
 
 ### Planned
 
@@ -69,14 +71,16 @@ Install the full runtime dependency set before running the application:
 pip install -r requirements.txt
 ```
 
+Start the original application skeleton:
+
 ```bash
 uvicorn main:app --reload
 ```
 
-Health Check
+Health check:
 
-```text
-GET http://localhost:8000/health
+```bash
+curl http://localhost:8000/health
 ```
 
 Run the local video pipeline against a video file:
@@ -95,10 +99,31 @@ Save emitted events to a local SQLite database while still printing JSON lines:
 python scripts/run_video.py /path/to/video.mp4 --save-events --db-path data/events.db
 ```
 
+If `--db-path` is omitted, the video runner writes to `data/events.db`.
+
 List saved SQLite events as JSON lines:
 
 ```bash
 python scripts/list_events.py --db-path data/events.db
+```
+
+Start the read-only saved events API:
+
+```bash
+EVENT_DB_PATH=data/events.db uvicorn api.main:app --reload
+```
+
+`EVENT_DB_PATH` is optional. If it is not set, the API reads from
+`data/events.db`.
+
+Example API requests:
+
+```bash
+curl http://localhost:8000/health
+curl "http://localhost:8000/events?limit=25&offset=0"
+curl "http://localhost:8000/events?event_type=danger_zone&limit=10"
+curl "http://localhost:8000/events/latest?limit=5"
+curl http://localhost:8000/stats
 ```
 
 ## Tests

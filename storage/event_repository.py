@@ -46,7 +46,12 @@ class EventRepository:
     def save_many(self, events: list[dict]) -> list[int]:
         return [self.save(event) for event in events]
 
-    def list_events(self, limit: int | None = None) -> list[dict]:
+    def list_events(
+        self,
+        limit: int | None = None,
+        offset: int = 0,
+        event_type: str | None = None,
+    ) -> list[dict]:
         query = """
             SELECT
                 id,
@@ -57,17 +62,68 @@ class EventRepository:
                 payload_json,
                 created_at
             FROM events
-            ORDER BY id ASC
         """
-        params: tuple[int, ...] = ()
+        params: list[int | str] = []
+
+        if event_type is not None:
+            query += " WHERE event_type = ?"
+            params.append(event_type)
+
+        query += " ORDER BY id ASC"
+
         if limit is not None:
-            query += " LIMIT ?"
-            params = (limit,)
+            query += " LIMIT ? OFFSET ?"
+            params.extend([limit, offset])
+        elif offset:
+            query += " LIMIT -1 OFFSET ?"
+            params.append(offset)
 
         with self._connect() as connection:
-            rows = connection.execute(query, params).fetchall()
+            rows = connection.execute(query, tuple(params)).fetchall()
 
         return [dict(row) for row in rows]
+
+    def list_latest_events(self, limit: int = 10) -> list[dict]:
+        query = """
+            SELECT
+                id,
+                event_type,
+                camera_id,
+                track_id,
+                timestamp,
+                payload_json,
+                created_at
+            FROM events
+            ORDER BY id DESC
+            LIMIT ?
+        """
+
+        with self._connect() as connection:
+            rows = connection.execute(query, (limit,)).fetchall()
+
+        return [dict(row) for row in rows]
+
+    def count_events(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute("SELECT COUNT(*) AS count FROM events").fetchone()
+
+        return int(row["count"])
+
+    def count_events_by_type(self) -> dict[str, int]:
+        query = """
+            SELECT event_type, COUNT(*) AS count
+            FROM events
+            GROUP BY event_type
+            ORDER BY event_type ASC
+        """
+
+        with self._connect() as connection:
+            rows = connection.execute(query).fetchall()
+
+        return {
+            str(row["event_type"] or "unknown"): int(row["count"])
+            for row in rows
+        }
 
     def _create_table(self) -> None:
         with self._connect() as connection:
