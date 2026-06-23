@@ -116,6 +116,17 @@ EVENT_DB_PATH=data/events.db uvicorn api.main:app --reload
 `EVENT_DB_PATH` is optional. If it is not set, the API reads from
 `data/events.db`.
 
+Open the saved events dashboard in a browser:
+
+```text
+http://localhost:8000/
+http://localhost:8000/dashboard
+```
+
+The dashboard is server-rendered by FastAPI. It shows service status, total
+event count, event count by type, and the latest saved events from the same
+SQLite database used by the API.
+
 Example API requests:
 
 ```bash

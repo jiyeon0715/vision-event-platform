@@ -91,3 +91,39 @@ def test_stats_returns_total_and_counts_by_type(tmp_path, monkeypatch) -> None:
             "line_crossing": 1,
         },
     }
+
+
+def test_dashboard_route_shows_saved_event_summary(tmp_path, monkeypatch) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    repository = EventRepository(db_path)
+    repository.save(make_event(event_type="danger_zone", track_id=1))
+    repository.save(make_event(event_type="line_crossing", track_id=2))
+
+    response = client.get("/dashboard")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "Vision Events Dashboard" in response.text
+    assert "Service status" in response.text
+    assert "OK" in response.text
+    assert "Total event count" in response.text
+    assert "<p class=\"value\">2</p>" in response.text
+    assert "danger_zone" in response.text
+    assert "line_crossing" in response.text
+    assert "camera-1" in response.text
+    assert "track_id" in response.text
+    assert db_path in response.text
+
+
+def test_root_route_serves_dashboard(tmp_path, monkeypatch) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    repository = EventRepository(db_path)
+    repository.save(make_event(event_type="danger_zone", track_id=7))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "Vision Events Dashboard" in response.text
+    assert "danger_zone" in response.text
+    assert "<td>7</td>" in response.text
