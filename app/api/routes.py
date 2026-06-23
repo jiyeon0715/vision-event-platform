@@ -27,7 +27,12 @@ def get_event_repository() -> EventReader:
     return EventRepository()
 
 
-@router.get("/events", response_model=list[EventResponse], tags=["events"])
+@router.get(
+    "/events",
+    response_model=list[EventResponse],
+    response_model_exclude_none=True,
+    tags=["events"],
+)
 async def list_events(
     repository: Annotated[EventReader, Depends(get_event_repository)],
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
@@ -36,7 +41,12 @@ async def list_events(
     return repository.list_recent(limit=limit)
 
 
-@router.get("/events/{event_id}", response_model=EventResponse, tags=["events"])
+@router.get(
+    "/events/{event_id}",
+    response_model=EventResponse,
+    response_model_exclude_none=True,
+    tags=["events"],
+)
 async def get_event(
     event_id: int,
     repository: Annotated[EventReader, Depends(get_event_repository)],

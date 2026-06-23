@@ -18,6 +18,7 @@ if ConfigDict is not None:
         track_id: int
         timestamp: float
         message: str
+        snapshot_path: str | None = None
         created_at: datetime
 
         model_config = ConfigDict(from_attributes=True)
@@ -30,6 +31,7 @@ else:
         track_id: int
         timestamp: float
         message: str
+        snapshot_path: str | None = None
         created_at: datetime
 
         class Config:

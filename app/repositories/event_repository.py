@@ -70,6 +70,7 @@ class EventRepository:
                 track_id=event.track_id,
                 timestamp=event.timestamp,
                 message=event.message,
+                snapshot_path=getattr(event, "snapshot_path", None),
             )
             for event in event_list
         ]

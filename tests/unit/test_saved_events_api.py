@@ -22,7 +22,9 @@ def make_event(
 
 def make_client(tmp_path, monkeypatch) -> tuple[TestClient, str]:
     db_path = tmp_path / "events.db"
+    snapshot_dir = tmp_path / "snapshots"
     monkeypatch.setenv("EVENT_DB_PATH", str(db_path))
+    monkeypatch.setenv("SNAPSHOT_DIR", str(snapshot_dir))
     return TestClient(app), str(db_path)
 
 
@@ -113,6 +115,43 @@ def test_dashboard_route_shows_saved_event_summary(tmp_path, monkeypatch) -> Non
     assert "camera-1" in response.text
     assert "track_id" in response.text
     assert db_path in response.text
+
+
+def test_dashboard_renders_snapshot_thumbnail(tmp_path, monkeypatch) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir()
+    (snapshot_dir / "event-1.jpg").write_bytes(b"jpeg bytes")
+    repository = EventRepository(db_path)
+    event = make_event(event_type="danger_zone", track_id=1)
+    event["snapshot_path"] = str(snapshot_dir / "event-1.jpg")
+    repository.save(event)
+
+    response = client.get("/dashboard")
+
+    assert response.status_code == 200
+    assert "<th>Snapshot</th>" in response.text
+    assert 'href="/snapshots/event-1.jpg"' in response.text
+    assert 'src="/snapshots/event-1.jpg"' in response.text
+    assert 'class="snapshot-thumb"' in response.text
+
+
+def test_snapshot_endpoint_serves_file_and_missing_returns_404(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    client, _ = make_client(tmp_path, monkeypatch)
+    snapshot_dir = tmp_path / "snapshots"
+    snapshot_dir.mkdir()
+    (snapshot_dir / "event-1.jpg").write_bytes(b"jpeg bytes")
+
+    response = client.get("/snapshots/event-1.jpg")
+    missing_response = client.get("/snapshots/missing.jpg")
+
+    assert response.status_code == 200
+    assert response.content == b"jpeg bytes"
+    assert response.headers["content-type"] == "image/jpeg"
+    assert missing_response.status_code == 404
 
 
 def test_root_route_serves_dashboard(tmp_path, monkeypatch) -> None:

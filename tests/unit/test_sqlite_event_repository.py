@@ -64,3 +64,43 @@ def test_payload_json_is_preserved(tmp_path) -> None:
     saved_event = repository.list_events()[0]
 
     assert json.loads(saved_event["payload_json"]) == event
+
+
+def test_snapshot_path_is_persisted(tmp_path) -> None:
+    repository = EventRepository(tmp_path / "events.db")
+    event = make_event()
+    event["snapshot_path"] = "data/snapshots/event-1.jpg"
+
+    repository.save(event)
+    saved_event = repository.list_events()[0]
+
+    assert saved_event["snapshot_path"] == "data/snapshots/event-1.jpg"
+    assert json.loads(saved_event["payload_json"])["snapshot_path"] == (
+        "data/snapshots/event-1.jpg"
+    )
+
+
+def test_existing_database_adds_snapshot_path_column(tmp_path) -> None:
+    db_path = tmp_path / "events.db"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT,
+                camera_id TEXT,
+                track_id INTEGER,
+                timestamp REAL,
+                payload_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.commit()
+
+    repository = EventRepository(db_path)
+    repository.save(make_event())
+    saved_event = repository.list_events()[0]
+
+    assert "snapshot_path" in saved_event.keys()
+    assert saved_event["snapshot_path"] is None

@@ -33,7 +33,10 @@ ENV/
 logs/
 
 # Data / model files
-data/
+data/*
+!data/snapshots/
+data/snapshots/*
+!data/snapshots/.gitkeep
 models/
 weights/
 *.pt

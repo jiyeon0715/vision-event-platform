@@ -6,8 +6,7 @@ import sys
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
-
-import cv2
+from uuid import uuid4
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -15,6 +14,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.pipeline.vision_event_pipeline import VisionEventPipeline
 from storage.event_repository import EventRepository
+
+DEFAULT_SNAPSHOT_DIR = Path("data/snapshots")
 
 
 class _NoOpEventRepository:
@@ -42,6 +43,12 @@ def parse_args() -> argparse.Namespace:
         default=Path("data/events.db"),
         help="SQLite database path used with --save-events.",
     )
+    parser.add_argument(
+        "--snapshot-dir",
+        type=Path,
+        default=DEFAULT_SNAPSHOT_DIR,
+        help="Directory where event frame snapshots are stored.",
+    )
     return parser.parse_args()
 
 
@@ -52,6 +59,7 @@ def main() -> int:
         print(f"Video file not found: {video_path}", file=sys.stderr)
         return 1
 
+    cv2 = _load_cv2()
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
         print(f"Unable to open video file: {video_path}", file=sys.stderr)
@@ -59,6 +67,7 @@ def main() -> int:
 
     pipeline = VisionEventPipeline(event_repository=_NoOpEventRepository())
     event_repository = EventRepository(args.db_path) if args.save_events else None
+    snapshot_dir = args.snapshot_dir
     fps = capture.get(cv2.CAP_PROP_FPS) or 0.0
     frame_index = 0
 
@@ -73,6 +82,8 @@ def main() -> int:
             events = pipeline.process_frame(frame, timestamp)
             for event in events:
                 event_dict = _event_to_dict(event)
+                snapshot_path = save_event_snapshot(frame, snapshot_dir)
+                event_dict["snapshot_path"] = str(snapshot_path)
                 print(json.dumps(event_dict, sort_keys=True))
                 if event_repository is not None:
                     event_repository.save(event_dict)
@@ -108,6 +119,21 @@ def _event_to_dict(event: Any) -> dict[str, Any]:
         "timestamp": getattr(event, "timestamp", None),
         "message": getattr(event, "message", None),
     }
+
+
+def save_event_snapshot(frame: Any, snapshot_dir: Path) -> Path:
+    cv2 = _load_cv2()
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path = snapshot_dir / f"{uuid4().hex}.jpg"
+    if not cv2.imwrite(str(snapshot_path), frame):
+        raise RuntimeError(f"Failed to write snapshot: {snapshot_path}")
+    return snapshot_path
+
+
+def _load_cv2() -> Any:
+    import cv2
+
+    return cv2
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ class EventRepository:
     def save(self, event: dict) -> int:
         payload_json = json.dumps(event, sort_keys=True)
         created_at = datetime.now(timezone.utc).isoformat()
+        snapshot_path = event.get("snapshot_path")
 
         with self._connect() as connection:
             cursor = connection.execute(
@@ -26,16 +27,18 @@ class EventRepository:
                     camera_id,
                     track_id,
                     timestamp,
+                    snapshot_path,
                     payload_json,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event.get("event_type"),
                     event.get("camera_id"),
                     event.get("track_id"),
                     event.get("timestamp"),
+                    snapshot_path,
                     payload_json,
                     created_at,
                 ),
@@ -59,6 +62,7 @@ class EventRepository:
                 camera_id,
                 track_id,
                 timestamp,
+                snapshot_path,
                 payload_json,
                 created_at
             FROM events
@@ -91,6 +95,7 @@ class EventRepository:
                 camera_id,
                 track_id,
                 timestamp,
+                snapshot_path,
                 payload_json,
                 created_at
             FROM events
@@ -135,11 +140,18 @@ class EventRepository:
                     camera_id TEXT,
                     track_id INTEGER,
                     timestamp REAL,
+                    snapshot_path TEXT,
                     payload_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(events)").fetchall()
+            }
+            if "snapshot_path" not in columns:
+                connection.execute("ALTER TABLE events ADD COLUMN snapshot_path TEXT")
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:

@@ -5,19 +5,25 @@ import os
 from html import escape
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, Query
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi.responses import FileResponse, HTMLResponse
 
 from storage.event_repository import EventRepository
 
 DEFAULT_DB_PATH = Path("data/events.db")
+DEFAULT_SNAPSHOT_DIR = Path("data/snapshots")
 
 app = FastAPI(title="Vision Events API")
 
 
 def get_db_path() -> Path:
     return Path(os.environ.get("EVENT_DB_PATH", DEFAULT_DB_PATH))
+
+
+def get_snapshot_dir() -> Path:
+    return Path(os.environ.get("SNAPSHOT_DIR", DEFAULT_SNAPSHOT_DIR))
 
 
 def get_event_repository(
@@ -89,6 +95,21 @@ def stats(
     }
 
 
+@app.get("/snapshots/{filename}")
+def get_snapshot(
+    filename: str,
+    snapshot_dir: Annotated[Path, Depends(get_snapshot_dir)],
+) -> FileResponse:
+    snapshot_path = snapshot_dir / Path(filename).name
+    if not snapshot_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Snapshot not found",
+        )
+
+    return FileResponse(snapshot_path, media_type="image/jpeg")
+
+
 def _format_event(event: dict) -> dict:
     readable_event = {
         "id": event["id"],
@@ -99,6 +120,8 @@ def _format_event(event: dict) -> dict:
         "created_at": event["created_at"],
         "payload": _parse_payload(event["payload_json"]),
     }
+    if event.get("snapshot_path") is not None:
+        readable_event["snapshot_path"] = event["snapshot_path"]
     return readable_event
 
 
@@ -252,6 +275,21 @@ def _render_dashboard(
       font-size: 13px;
       word-break: break-all;
     }}
+
+    .snapshot-link {{
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      background: #fff;
+    }}
+
+    .snapshot-thumb {{
+      width: 88px;
+      height: 56px;
+      object-fit: cover;
+      display: block;
+    }}
   </style>
 </head>
 <body>
@@ -322,6 +360,7 @@ def _render_latest_event_rows(events: list[dict]) -> str:
       <td>{_html(event["camera_id"])}</td>
       <td>{_html(event["track_id"])}</td>
       <td>{_html(event["timestamp"])}</td>
+      <td>{_render_snapshot_cell(event.get("snapshot_path"))}</td>
       <td>{_html(event["created_at"])}</td>
     </tr>"""
         for event in events
@@ -334,6 +373,7 @@ def _render_latest_event_rows(events: list[dict]) -> str:
       <th>camera_id</th>
       <th>track_id</th>
       <th>timestamp</th>
+      <th>Snapshot</th>
       <th>created_at</th>
     </tr>
   </thead>
@@ -341,6 +381,24 @@ def _render_latest_event_rows(events: list[dict]) -> str:
     {rows}
   </tbody>
 </table>"""
+
+
+def _render_snapshot_cell(snapshot_path: object) -> str:
+    if not snapshot_path:
+        return '<span class="empty">Missing</span>'
+
+    filename = Path(str(snapshot_path)).name
+    if not filename:
+        return '<span class="empty">Missing</span>'
+
+    snapshot_url = f"/snapshots/{quote(filename)}"
+    escaped_url = _html(snapshot_url)
+    return (
+        f'<a class="snapshot-link" href="{escaped_url}" target="_blank" '
+        f'rel="noopener noreferrer">'
+        f'<img class="snapshot-thumb" src="{escaped_url}" alt="Event snapshot">'
+        "</a>"
+    )
 
 
 def _html(value: object) -> str:
