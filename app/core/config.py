@@ -42,6 +42,12 @@ class TrackerSettings:
 
 
 @dataclass(frozen=True)
+class CameraSettings:
+    id: str
+    source: str
+
+
+@dataclass(frozen=True)
 class EventSettings:
     danger_zone: tuple[tuple[float, float], ...] | str = ()
     threshold_sec: float | None = None
@@ -112,6 +118,7 @@ class Settings:
     yolo: YoloSettings
     tracker: TrackerSettings
     event: EventSettings
+    cameras: tuple[CameraSettings, ...] = ()
     alert_policy: AlertPolicySettings = field(default_factory=AlertPolicySettings)
     rules: tuple[RuleSettings, ...] = ()
 
@@ -258,6 +265,27 @@ def _alert_policy(config_data: Mapping[str, Any]) -> AlertPolicySettings:
     return AlertPolicySettings(**alert_policy)
 
 
+def _cameras(config_data: Mapping[str, Any]) -> tuple[CameraSettings, ...]:
+    cameras = config_data.get("cameras", ())
+    if cameras in (None, ()):
+        return ()
+    if not isinstance(cameras, list):
+        raise ValueError("Configuration section must be a list: cameras")
+
+    parsed_cameras = []
+    seen_ids: set[str] = set()
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            raise ValueError("Each camera configuration must be a mapping")
+        parsed_camera = CameraSettings(**camera)
+        if parsed_camera.id in seen_ids:
+            raise ValueError(f"Duplicate camera id in configuration: {parsed_camera.id}")
+        seen_ids.add(parsed_camera.id)
+        parsed_cameras.append(parsed_camera)
+
+    return tuple(parsed_cameras)
+
+
 def load_settings(
     config_path: Path = CONFIG_PATH,
     environ: Mapping[str, str] | None = None,
@@ -274,6 +302,7 @@ def load_settings(
         database=DatabaseSettings(**database_config),
         yolo=YoloSettings(**_section(config_data, "yolo")),
         tracker=TrackerSettings(**_section(config_data, "tracker")),
+        cameras=_cameras(config_data),
         event=EventSettings(**_section(config_data, "event")),
         alert_policy=_alert_policy(config_data),
         rules=_rules(config_data),

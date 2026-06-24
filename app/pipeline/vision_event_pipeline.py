@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import is_dataclass, replace
 from typing import Protocol, Sequence
 
 from app.detector.yolo_detector import Detection, YoloDetector
@@ -43,7 +44,9 @@ class VisionEventPipeline:
         rules: Sequence[RuleEvaluator] | None = None,
         event_repository: EventWriter | None = None,
         alert_policy: AlertPolicy | None = None,
+        camera_id: str = "default",
     ) -> None:
+        self.camera_id = camera_id
         self._detector = detector or YoloDetector()
         self._tracker = tracker or ByteTrackTracker()
         self._rules = (
@@ -57,7 +60,7 @@ class VisionEventPipeline:
         detections = self._detector.detect(frame)
         tracks = self._tracker.update(detections)
         events = [
-            event
+            _event_with_camera_id(event, self.camera_id)
             for rule in self._rules
             for event in rule.evaluate(tracks, timestamp)
         ]
@@ -85,3 +88,14 @@ def _default_alert_policy() -> AlertPolicy:
     from app.core.config import get_settings
 
     return AlertPolicy.from_settings(get_settings().alert_policy)
+
+
+def _event_with_camera_id(event: Event, camera_id: str) -> Event:
+    if isinstance(event, dict):
+        return {**event, "camera_id": camera_id}  # type: ignore[return-value]
+
+    if is_dataclass(event):
+        return replace(event, camera_id=camera_id)
+
+    setattr(event, "camera_id", camera_id)
+    return event

@@ -6,10 +6,10 @@ import sqlite3
 from storage.event_repository import EventRepository
 
 
-def make_event(track_id: int = 42) -> dict:
+def make_event(track_id: int = 42, camera_id: str = "camera-1") -> dict:
     return {
         "event_type": "danger_zone",
-        "camera_id": "camera-1",
+        "camera_id": camera_id,
         "track_id": track_id,
         "timestamp": 123.45,
         "message": f"Track {track_id} stayed inside the danger zone.",
@@ -54,6 +54,28 @@ def test_list_events(tmp_path) -> None:
     events = repository.list_events()
 
     assert [event["track_id"] for event in events] == [1, 2]
+
+
+def test_list_events_filters_by_camera_id(tmp_path) -> None:
+    repository = EventRepository(tmp_path / "events.db")
+    repository.save(make_event(track_id=1, camera_id="gate_01"))
+    repository.save(make_event(track_id=2, camera_id="gate_02"))
+
+    events = repository.list_events(camera_id="gate_02")
+
+    assert [event["track_id"] for event in events] == [2]
+    assert [event["camera_id"] for event in events] == ["gate_02"]
+
+
+def test_latest_events_filters_by_camera_id(tmp_path) -> None:
+    repository = EventRepository(tmp_path / "events.db")
+    repository.save(make_event(track_id=1, camera_id="gate_01"))
+    repository.save(make_event(track_id=2, camera_id="gate_02"))
+    repository.save(make_event(track_id=3, camera_id="gate_01"))
+
+    events = repository.list_latest_events(limit=2, camera_id="gate_01")
+
+    assert [event["track_id"] for event in events] == [3, 1]
 
 
 def test_payload_json_is_preserved(tmp_path) -> None:

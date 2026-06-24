@@ -54,6 +54,7 @@ class EventRepository:
         limit: int | None = None,
         offset: int = 0,
         event_type: str | None = None,
+        camera_id: str | None = None,
     ) -> list[dict]:
         query = """
             SELECT
@@ -67,11 +68,18 @@ class EventRepository:
                 created_at
             FROM events
         """
+        clauses = []
         params: list[int | str] = []
 
         if event_type is not None:
-            query += " WHERE event_type = ?"
+            clauses.append("event_type = ?")
             params.append(event_type)
+        if camera_id is not None:
+            clauses.append("camera_id = ?")
+            params.append(camera_id)
+
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
 
         query += " ORDER BY id ASC"
 
@@ -87,7 +95,11 @@ class EventRepository:
 
         return [dict(row) for row in rows]
 
-    def list_latest_events(self, limit: int = 10) -> list[dict]:
+    def list_latest_events(
+        self,
+        limit: int = 10,
+        camera_id: str | None = None,
+    ) -> list[dict]:
         query = """
             SELECT
                 id,
@@ -99,12 +111,17 @@ class EventRepository:
                 payload_json,
                 created_at
             FROM events
-            ORDER BY id DESC
-            LIMIT ?
         """
+        params: list[int | str] = []
+        if camera_id is not None:
+            query += " WHERE camera_id = ?"
+            params.append(camera_id)
+
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
 
         with self._connect() as connection:
-            rows = connection.execute(query, (limit,)).fetchall()
+            rows = connection.execute(query, tuple(params)).fetchall()
 
         return [dict(row) for row in rows]
 
@@ -152,6 +169,8 @@ class EventRepository:
             }
             if "snapshot_path" not in columns:
                 connection.execute("ALTER TABLE events ADD COLUMN snapshot_path TEXT")
+            if "camera_id" not in columns:
+                connection.execute("ALTER TABLE events ADD COLUMN camera_id TEXT")
             connection.commit()
 
     def _connect(self) -> sqlite3.Connection:

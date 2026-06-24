@@ -20,6 +20,11 @@ tracker:
   type: bytetrack
   max_age: 20
   min_hits: 2
+cameras:
+  - id: gate_01
+    source: video1.mp4
+  - id: gate_02
+    source: video2.mp4
 event:
   danger_zone: [[0, 0], [10, 0], [10, 10], [0, 10]]
   threshold_sec: 3
@@ -63,6 +68,11 @@ def test_load_settings_from_yaml(tmp_path: Path) -> None:
     assert settings.yolo.confidence_threshold == 0.75
     assert settings.tracker.type == "bytetrack"
     assert settings.tracker.max_age == 20
+    assert [camera.id for camera in settings.cameras] == ["gate_01", "gate_02"]
+    assert [camera.source for camera in settings.cameras] == [
+        "video1.mp4",
+        "video2.mp4",
+    ]
     assert settings.event.danger_zone == (
         (0.0, 0.0),
         (10.0, 0.0),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
@@ -13,7 +13,27 @@ from app.database.urls import database_backend
 def initialize_database(engine: Engine | None = None) -> None:
     """Create application tables when they do not already exist."""
 
-    Base.metadata.create_all(bind=engine or get_engine())
+    active_engine = engine or get_engine()
+    Base.metadata.create_all(bind=active_engine)
+    _ensure_camera_id_column(active_engine)
+
+
+def _ensure_camera_id_column(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("events"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("events")}
+    if "camera_id" in columns:
+        return
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE events "
+                "ADD COLUMN camera_id VARCHAR(128) NOT NULL DEFAULT 'default'"
+            )
+        )
 
 
 def check_database_health(

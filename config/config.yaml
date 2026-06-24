@@ -15,6 +15,12 @@ tracker:
   max_age: 30
   min_hits: 3
 
+cameras:
+  - id: gate_01
+    source: data/videos/video1.mp4
+  - id: gate_02
+    source: data/videos/video2.mp4
+
 event:
   danger_zone_threshold: 0.8
   cooldown_seconds: 60

@@ -13,6 +13,7 @@ class Event:
     track_id: int
     timestamp: float
     message: str
+    camera_id: str = "default"
 
 
 class BaseRule(ABC):

@@ -37,15 +37,17 @@ def get_event_repository(
 def dashboard(
     db_path: Annotated[Path, Depends(get_db_path)],
     repository: Annotated[EventRepository, Depends(get_event_repository)],
+    camera_id: str | None = None,
 ) -> HTMLResponse:
     service_status = health(db_path)["status"].upper()
     event_stats = stats(repository)
-    events = latest_events(repository, limit=10)
+    events = latest_events(repository, limit=10, camera_id=camera_id)
 
     return HTMLResponse(
         _render_dashboard(
             service_status=service_status,
             db_path=db_path,
+            camera_id=camera_id,
             total_event_count=event_stats["total_event_count"],
             event_count_by_type=event_stats["event_count_by_type"],
             latest_event_rows=events,
@@ -67,11 +69,13 @@ def list_events(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
     event_type: str | None = None,
+    camera_id: str | None = None,
 ) -> list[dict]:
     events = repository.list_events(
         limit=limit,
         offset=offset,
         event_type=event_type,
+        camera_id=camera_id,
     )
     return [_format_event(event) for event in events]
 
@@ -80,8 +84,9 @@ def list_events(
 def latest_events(
     repository: Annotated[EventRepository, Depends(get_event_repository)],
     limit: Annotated[int, Query(ge=1, le=500)] = 10,
+    camera_id: str | None = None,
 ) -> list[dict]:
-    events = repository.list_latest_events(limit=limit)
+    events = repository.list_latest_events(limit=limit, camera_id=camera_id)
     return [_format_event(event) for event in events]
 
 
@@ -95,19 +100,19 @@ def stats(
     }
 
 
-@app.get("/snapshots/{filename}")
+@app.get("/snapshots/{snapshot_path:path}")
 def get_snapshot(
-    filename: str,
+    snapshot_path: str,
     snapshot_dir: Annotated[Path, Depends(get_snapshot_dir)],
 ) -> FileResponse:
-    snapshot_path = snapshot_dir / Path(filename).name
-    if not snapshot_path.is_file():
+    resolved_snapshot_path = _resolve_snapshot_path(snapshot_dir, snapshot_path)
+    if not resolved_snapshot_path.is_file():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Snapshot not found",
         )
 
-    return FileResponse(snapshot_path, media_type="image/jpeg")
+    return FileResponse(resolved_snapshot_path, media_type="image/jpeg")
 
 
 def _format_event(event: dict) -> dict:
@@ -140,6 +145,7 @@ def _parse_payload(payload_json: str) -> dict:
 def _render_dashboard(
     service_status: str,
     db_path: Path,
+    camera_id: str | None,
     total_event_count: int,
     event_count_by_type: dict[str, int],
     latest_event_rows: list[dict],
@@ -276,6 +282,46 @@ def _render_dashboard(
       word-break: break-all;
     }}
 
+    .filter-form {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: end;
+    }}
+
+    .filter-field {{
+      display: grid;
+      gap: 4px;
+    }}
+
+    .filter-field label {{
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }}
+
+    .filter-field input {{
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font: inherit;
+      padding: 8px 10px;
+    }}
+
+    .filter-form button, .filter-form a {{
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      padding: 8px 12px;
+      text-decoration: none;
+    }}
+
+    .filter-form a {{
+      background: #fff;
+      color: var(--accent);
+    }}
+
     .snapshot-link {{
       display: inline-flex;
       border: 1px solid var(--border);
@@ -312,6 +358,10 @@ def _render_dashboard(
         <p class="label">SQLite database</p>
         <p class="db-path">{_html(str(db_path))}</p>
       </div>
+      <div class="card">
+        <p class="label">Camera filter</p>
+        <p class="db-path">{_html(camera_id or "all cameras")}</p>
+      </div>
     </section>
 
     <section class="section">
@@ -321,6 +371,7 @@ def _render_dashboard(
 
     <section class="section">
       <h2>Latest Events</h2>
+      {_render_camera_filter(camera_id)}
       {event_rows}
     </section>
   </main>
@@ -383,15 +434,26 @@ def _render_latest_event_rows(events: list[dict]) -> str:
 </table>"""
 
 
+def _render_camera_filter(camera_id: str | None) -> str:
+    return f"""<form class="filter-form" method="get" action="/dashboard">
+  <div class="filter-field">
+    <label for="camera_id">camera_id</label>
+    <input id="camera_id" name="camera_id" value="{_html(camera_id or "")}">
+  </div>
+  <button type="submit">Filter</button>
+  <a href="/dashboard">Clear</a>
+</form>"""
+
+
 def _render_snapshot_cell(snapshot_path: object) -> str:
     if not snapshot_path:
         return '<span class="empty">Missing</span>'
 
-    filename = Path(str(snapshot_path)).name
-    if not filename:
+    relative_path = _snapshot_url_path(Path(str(snapshot_path)))
+    if not relative_path:
         return '<span class="empty">Missing</span>'
 
-    snapshot_url = f"/snapshots/{quote(filename)}"
+    snapshot_url = f"/snapshots/{quote(relative_path)}"
     escaped_url = _html(snapshot_url)
     return (
         f'<a class="snapshot-link" href="{escaped_url}" target="_blank" '
@@ -403,3 +465,23 @@ def _render_snapshot_cell(snapshot_path: object) -> str:
 
 def _html(value: object) -> str:
     return escape(str(value))
+
+
+def _snapshot_url_path(snapshot_path: Path) -> str:
+    snapshot_dir = get_snapshot_dir()
+    try:
+        return snapshot_path.relative_to(snapshot_dir).as_posix()
+    except ValueError:
+        return snapshot_path.name
+
+
+def _resolve_snapshot_path(snapshot_dir: Path, snapshot_path: str) -> Path:
+    candidate = snapshot_dir.joinpath(*Path(snapshot_path).parts)
+    resolved_dir = snapshot_dir.resolve()
+    resolved_candidate = candidate.resolve()
+    if resolved_candidate == resolved_dir or resolved_dir not in resolved_candidate.parents:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Snapshot not found",
+        )
+    return resolved_candidate

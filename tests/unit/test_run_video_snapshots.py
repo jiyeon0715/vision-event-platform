@@ -17,10 +17,11 @@ def test_save_event_snapshot_writes_unique_jpeg_files(
     monkeypatch.setitem(sys.modules, "cv2", SimpleNamespace(imwrite=fake_imwrite))
     run_video = importlib.import_module("scripts.run_video")
 
-    first_snapshot = run_video.save_event_snapshot("frame", tmp_path)
-    second_snapshot = run_video.save_event_snapshot("frame", tmp_path)
+    first_snapshot = run_video.save_event_snapshot("frame", tmp_path, camera_id="gate_01")
+    second_snapshot = run_video.save_event_snapshot("frame", tmp_path, camera_id="gate_02")
 
-    assert first_snapshot.parent == tmp_path
+    assert first_snapshot.parent == tmp_path / "gate_01"
+    assert second_snapshot.parent == tmp_path / "gate_02"
     assert first_snapshot.suffix == ".jpg"
     assert second_snapshot.suffix == ".jpg"
     assert first_snapshot != second_snapshot

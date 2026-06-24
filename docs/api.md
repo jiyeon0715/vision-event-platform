@@ -32,6 +32,7 @@ Returns recent events ordered by creation time, newest first.
 Query parameters:
 
 - `limit`: Maximum number of events to return. Defaults to `100`; allowed range is `1` to `500`.
+- `camera_id`: Optional camera id filter.
 
 Response:
 
@@ -40,6 +41,7 @@ Response:
   {
     "id": 1,
     "event_type": "danger_zone",
+    "camera_id": "gate_01",
     "track_id": 42,
     "timestamp": 123.45,
     "message": "Track 42 stayed inside the danger zone.",
@@ -52,6 +54,7 @@ Response:
 
 Returns the latest persisted events ordered by creation time, newest first.
 Defaults to `limit=10`; allowed range is `1` to `500`.
+Accepts the same optional `camera_id` filter as `GET /events`.
 
 ### `GET /events/{event_id}`
 
@@ -63,6 +66,7 @@ Response:
 {
   "id": 1,
   "event_type": "danger_zone",
+  "camera_id": "gate_01",
   "track_id": 42,
   "timestamp": 123.45,
   "message": "Track 42 stayed inside the danger zone.",

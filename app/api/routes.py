@@ -8,7 +8,11 @@ router = APIRouter()
 
 
 class EventReader(Protocol):
-    def list_recent(self, limit: int = 100) -> list[object]:
+    def list_recent(
+        self,
+        limit: int = 100,
+        camera_id: str | None = None,
+    ) -> list[object]:
         ...
 
     def get(self, event_id: int) -> object | None:
@@ -50,9 +54,10 @@ def get_event_repository() -> EventReader:
 async def list_events(
     repository: Annotated[EventReader, Depends(get_event_repository)],
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    camera_id: str | None = None,
 ) -> list[object]:
     """Return recent events ordered by creation time."""
-    return repository.list_recent(limit=limit)
+    return repository.list_recent(limit=limit, camera_id=camera_id)
 
 
 @router.get(
@@ -64,9 +69,10 @@ async def list_events(
 async def list_latest_events(
     repository: Annotated[EventReader, Depends(get_event_repository)],
     limit: Annotated[int, Query(ge=1, le=500)] = 10,
+    camera_id: str | None = None,
 ) -> list[object]:
     """Return the latest persisted events."""
-    return repository.list_recent(limit=limit)
+    return repository.list_recent(limit=limit, camera_id=camera_id)
 
 
 @router.get(

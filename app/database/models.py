@@ -15,6 +15,13 @@ class Event(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    camera_id: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        index=True,
+        default="default",
+        server_default="default",
+    )
     track_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     timestamp: Mapped[float] = mapped_column(Float, nullable=False)
     message: Mapped[str] = mapped_column(String(500), nullable=False)

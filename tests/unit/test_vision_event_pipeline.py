@@ -189,6 +189,60 @@ def test_process_frame_suppresses_events_rejected_by_alert_policy() -> None:
     assert event_repository.save_many_calls == [[first_event], []]
 
 
+def test_process_frame_stamps_events_with_camera_id() -> None:
+    recorder = CallRecorder(calls=[])
+    event = make_event(timestamp=1.0)
+    event_repository = MockEventRepository()
+    pipeline = VisionEventPipeline(
+        detector=MockDetector(detections=[], recorder=recorder),
+        tracker=MockTracker(tracks=[], recorder=recorder),
+        rules=[MockRule(events=[event], recorder=recorder)],
+        event_repository=event_repository,
+        camera_id="gate_01",
+    )
+
+    result = pipeline.process_frame(frame=object(), timestamp=1.0)
+
+    assert result[0].camera_id == "gate_01"
+    assert event_repository.save_many_calls[0][0].camera_id == "gate_01"
+
+
+def test_alert_policy_state_is_isolated_between_camera_pipelines() -> None:
+    first_recorder = CallRecorder(calls=[])
+    second_recorder = CallRecorder(calls=[])
+    first_rule = MockRule(events=[make_event(timestamp=1.0)], recorder=first_recorder)
+    second_rule = MockRule(events=[make_event(timestamp=1.0)], recorder=second_recorder)
+    first_repository = MockEventRepository()
+    second_repository = MockEventRepository()
+    first_pipeline = VisionEventPipeline(
+        detector=MockDetector(detections=[], recorder=first_recorder),
+        tracker=MockTracker(tracks=[], recorder=first_recorder),
+        rules=[first_rule],
+        event_repository=first_repository,
+        alert_policy=AlertPolicy(default_cooldown_sec=10),
+        camera_id="gate_01",
+    )
+    second_pipeline = VisionEventPipeline(
+        detector=MockDetector(detections=[], recorder=second_recorder),
+        tracker=MockTracker(tracks=[], recorder=second_recorder),
+        rules=[second_rule],
+        event_repository=second_repository,
+        alert_policy=AlertPolicy(default_cooldown_sec=10),
+        camera_id="gate_02",
+    )
+
+    first_result = first_pipeline.process_frame(frame=object(), timestamp=1.0)
+    second_result = second_pipeline.process_frame(frame=object(), timestamp=1.0)
+    first_rule.events = [make_event(timestamp=2.0)]
+    repeated_first_result = first_pipeline.process_frame(frame=object(), timestamp=2.0)
+
+    assert [event.camera_id for event in first_result] == ["gate_01"]
+    assert [event.camera_id for event in second_result] == ["gate_02"]
+    assert repeated_first_result == []
+    assert len(first_repository.save_many_calls[0]) == 1
+    assert len(second_repository.save_many_calls[0]) == 1
+
+
 def test_pipeline_constructs_default_components() -> None:
     detector = MagicMock()
     tracker = MagicMock()

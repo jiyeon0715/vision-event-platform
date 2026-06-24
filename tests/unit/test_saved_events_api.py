@@ -9,10 +9,11 @@ from storage.event_repository import EventRepository
 def make_event(
     event_type: str = "danger_zone",
     track_id: int = 42,
+    camera_id: str = "camera-1",
 ) -> dict:
     return {
         "event_type": event_type,
-        "camera_id": "camera-1",
+        "camera_id": camera_id,
         "track_id": track_id,
         "timestamp": 123.45 + track_id,
         "message": f"Track {track_id} emitted {event_type}.",
@@ -63,6 +64,20 @@ def test_list_events_supports_limit_offset_and_event_type(tmp_path, monkeypatch)
     ]
 
 
+def test_list_events_supports_camera_id_filter(tmp_path, monkeypatch) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    repository = EventRepository(db_path)
+    repository.save(make_event(track_id=1, camera_id="gate_01"))
+    repository.save(make_event(track_id=2, camera_id="gate_02"))
+    repository.save(make_event(track_id=3, camera_id="gate_01"))
+
+    response = client.get("/events?camera_id=gate_01")
+
+    assert response.status_code == 200
+    assert [event["track_id"] for event in response.json()] == [1, 3]
+    assert {event["camera_id"] for event in response.json()} == {"gate_01"}
+
+
 def test_latest_events_returns_newest_events_first(tmp_path, monkeypatch) -> None:
     client, db_path = make_client(tmp_path, monkeypatch)
     repository = EventRepository(db_path)
@@ -74,6 +89,19 @@ def test_latest_events_returns_newest_events_first(tmp_path, monkeypatch) -> Non
 
     assert response.status_code == 200
     assert [event["track_id"] for event in response.json()] == [3, 2]
+
+
+def test_latest_events_supports_camera_id_filter(tmp_path, monkeypatch) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    repository = EventRepository(db_path)
+    repository.save(make_event(track_id=1, camera_id="gate_01"))
+    repository.save(make_event(track_id=2, camera_id="gate_02"))
+    repository.save(make_event(track_id=3, camera_id="gate_01"))
+
+    response = client.get("/events/latest?camera_id=gate_01&limit=5")
+
+    assert response.status_code == 200
+    assert [event["track_id"] for event in response.json()] == [3, 1]
 
 
 def test_stats_returns_total_and_counts_by_type(tmp_path, monkeypatch) -> None:
@@ -113,26 +141,41 @@ def test_dashboard_route_shows_saved_event_summary(tmp_path, monkeypatch) -> Non
     assert "danger_zone" in response.text
     assert "line_crossing" in response.text
     assert "camera-1" in response.text
+    assert 'name="camera_id"' in response.text
     assert "track_id" in response.text
     assert db_path in response.text
+
+
+def test_dashboard_supports_camera_id_filter(tmp_path, monkeypatch) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    repository = EventRepository(db_path)
+    repository.save(make_event(track_id=1, camera_id="gate_01"))
+    repository.save(make_event(track_id=2, camera_id="gate_02"))
+
+    response = client.get("/dashboard?camera_id=gate_02")
+
+    assert response.status_code == 200
+    assert "gate_02" in response.text
+    assert "gate_01" not in response.text
 
 
 def test_dashboard_renders_snapshot_thumbnail(tmp_path, monkeypatch) -> None:
     client, db_path = make_client(tmp_path, monkeypatch)
     snapshot_dir = tmp_path / "snapshots"
-    snapshot_dir.mkdir()
-    (snapshot_dir / "event-1.jpg").write_bytes(b"jpeg bytes")
+    camera_snapshot_dir = snapshot_dir / "gate_01"
+    camera_snapshot_dir.mkdir(parents=True)
+    (camera_snapshot_dir / "event-1.jpg").write_bytes(b"jpeg bytes")
     repository = EventRepository(db_path)
-    event = make_event(event_type="danger_zone", track_id=1)
-    event["snapshot_path"] = str(snapshot_dir / "event-1.jpg")
+    event = make_event(event_type="danger_zone", track_id=1, camera_id="gate_01")
+    event["snapshot_path"] = str(camera_snapshot_dir / "event-1.jpg")
     repository.save(event)
 
     response = client.get("/dashboard")
 
     assert response.status_code == 200
     assert "<th>Snapshot</th>" in response.text
-    assert 'href="/snapshots/event-1.jpg"' in response.text
-    assert 'src="/snapshots/event-1.jpg"' in response.text
+    assert 'href="/snapshots/gate_01/event-1.jpg"' in response.text
+    assert 'src="/snapshots/gate_01/event-1.jpg"' in response.text
     assert 'class="snapshot-thumb"' in response.text
 
 
@@ -142,10 +185,11 @@ def test_snapshot_endpoint_serves_file_and_missing_returns_404(
 ) -> None:
     client, _ = make_client(tmp_path, monkeypatch)
     snapshot_dir = tmp_path / "snapshots"
-    snapshot_dir.mkdir()
-    (snapshot_dir / "event-1.jpg").write_bytes(b"jpeg bytes")
+    camera_snapshot_dir = snapshot_dir / "gate_01"
+    camera_snapshot_dir.mkdir(parents=True)
+    (camera_snapshot_dir / "event-1.jpg").write_bytes(b"jpeg bytes")
 
-    response = client.get("/snapshots/event-1.jpg")
+    response = client.get("/snapshots/gate_01/event-1.jpg")
     missing_response = client.get("/snapshots/missing.jpg")
 
     assert response.status_code == 200

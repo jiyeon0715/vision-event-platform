@@ -7,53 +7,53 @@ The goal of this project is to transform object detection results into an event-
 ## Architecture
 
 ```text
-Video Stream
-    ↓
-YOLO Detector
-    ↓
-ByteTrack Tracker
-    ↓
-Rule Engine
-    ├─ DangerZoneRule
-    ├─ LoiteringRule
-    └─ PersonCountRule
-    ↓
-AlertPolicy
-    ↓
-Snapshot
-    ↓
-Event Service
-    ↓
-PostgreSQL
-    ↓
-FastAPI API
+Camera definitions
+    ├─ gate_01 source
+    │   ↓
+    │   VisionEventPipeline context
+    │   ├─ YOLO Detector
+    │   ├─ ByteTrack Tracker
+    │   ├─ Rule Engine
+    │   └─ AlertPolicy
+    │       ↓
+    │       gate_01 events + snapshots
+    └─ gate_02 source
+        ↓
+        VisionEventPipeline context
+        ├─ YOLO Detector
+        ├─ ByteTrack Tracker
+        ├─ Rule Engine
+        └─ AlertPolicy
+            ↓
+            gate_02 events + snapshots
+                ↓
+          SQLite/PostgreSQL
+                ↓
+          FastAPI API + Dashboard
 ```
 
-The event evaluation layer is plugin-based. `VisionEventPipeline` detects and
-tracks each frame once, then passes the same track list to every enabled rule
-loaded from `config/config.yaml`. Each rule implements `BaseRule.evaluate()` and
-returns the same event model. `AlertPolicy` then throttles duplicate alerts
-before persistence, printing, and snapshot creation, so rules can keep evaluating
-every frame without flooding the database or dashboard.
+The event evaluation layer is plugin-based. Each configured camera gets its own
+`VisionEventPipeline` context with independent detector, tracker, rule, and
+`AlertPolicy` instances. Within that context, the pipeline detects and tracks
+each frame once, then passes the same track list to every enabled rule loaded
+from `config/config.yaml`. Each emitted event is stamped with the camera id
+before alert filtering, persistence, printing, and snapshot creation.
 
 ```mermaid
-flowchart TD
-    A["config/config.yaml"] --> B["load_rules()"]
-    B --> C["BaseRule plugins"]
-    C --> D["DangerZoneRule"]
-    C --> E["LoiteringRule"]
-    C --> F["PersonCountRule"]
-    G["VisionEventPipeline.process_frame()"] --> H["YOLO detections"]
-    H --> I["ByteTrack tracks"]
-    I --> D
-    I --> E
-    I --> F
-    D --> J["Combined rule events"]
-    E --> J
-    F --> J
-    J --> K["AlertPolicy"]
-    K --> L["Snapshot"]
-    L --> M["DB/API/Dashboard"]
+flowchart LR
+    A["config/config.yaml cameras[]"] --> B["gate_01 source"]
+    A --> C["gate_02 source"]
+    B --> D["Pipeline context: gate_01"]
+    C --> E["Pipeline context: gate_02"]
+    D --> F["Detector + Tracker + Rules"]
+    E --> G["Detector + Tracker + Rules"]
+    F --> H["gate_01 AlertPolicy"]
+    G --> I["gate_02 AlertPolicy"]
+    H --> J["Events with camera_id"]
+    I --> J
+    J --> K["Camera snapshot folders"]
+    J --> L["SQLite/PostgreSQL"]
+    L --> M["API and Dashboard camera filters"]
 ```
 
 ```mermaid
@@ -79,6 +79,7 @@ flowchart LR
 - SQLite event persistence
 - Read-only saved event API
 - Event frame snapshot storage and dashboard thumbnails
+- Multi-camera configuration and camera-filtered event queries
 - Plugin-based rule engine
 - Danger zone, loitering, and person-count rules
 
@@ -219,9 +220,32 @@ Run the local video pipeline against a video file:
 python scripts/run_video.py /path/to/video.mp4
 ```
 
-The runner reads frames with OpenCV, passes each frame through
-`VisionEventPipeline.process_frame()`, prints any emitted events to the console,
-and exits gracefully when it reaches the end of the file.
+The legacy single-video command is still supported. Events use
+`camera_id=default` unless `--camera-id` is provided:
+
+```bash
+python scripts/run_video.py /path/to/video.mp4 --camera-id gate_01
+```
+
+For multi-camera runs, define cameras in `config/config.yaml` and run without a
+positional video path:
+
+```yaml
+cameras:
+  - id: gate_01
+    source: data/videos/video1.mp4
+
+  - id: gate_02
+    source: data/videos/video2.mp4
+```
+
+```bash
+python scripts/run_video.py --config config/config.yaml
+```
+
+The runner reads frames with OpenCV, creates one `VisionEventPipeline` per
+camera, prints emitted events to the console, and exits gracefully when each
+source reaches the end of the file.
 
 Save emitted events to a local SQLite database while still printing JSON lines:
 
@@ -232,8 +256,10 @@ python scripts/run_video.py /path/to/video.mp4 --save-events --db-path data/even
 If `DATABASE_URL` is set, `--save-events` writes to that SQLAlchemy database URL.
 If no database URL is set, the video runner keeps the local SQLite behavior and
 writes to `data/events.db` unless `--db-path` is provided.
-When the runner emits an event, it writes the current frame to
-`data/snapshots/` as a JPEG and stores the snapshot path with the saved event.
+When the runner emits an event, it writes the current frame to a per-camera
+snapshot folder such as `data/snapshots/gate_01/` and stores the snapshot path
+with the saved event. The camera folder plus UUID filename avoids collisions
+across sources.
 Use `--snapshot-dir` to choose a different local snapshot directory:
 
 ```bash
@@ -325,10 +351,12 @@ http://localhost:8000/dashboard
 
 The dashboard is server-rendered by FastAPI. It shows service status, total
 event count, event count by type, and the latest saved events from the same
-SQLite database used by the API. Latest events include a Snapshot column with a
-thumbnail when `snapshot_path` is present. Clicking a thumbnail opens the
-full-size JPEG from `GET /snapshots/{filename}`. Missing snapshot files return a
-404 from the snapshot endpoint and do not prevent the dashboard from rendering.
+SQLite database used by the API. Latest events include `camera_id` and a
+Snapshot column with a thumbnail when `snapshot_path` is present. Add
+`?camera_id=gate_01` to show latest events for one camera. Clicking a thumbnail
+opens the full-size JPEG from `GET /snapshots/{camera_id}/{filename}`. Missing
+snapshot files return a 404 from the snapshot endpoint and do not prevent the
+dashboard from rendering.
 
 Example API requests:
 
@@ -336,8 +364,10 @@ Example API requests:
 curl http://localhost:8000/health
 curl "http://localhost:8000/events?limit=25&offset=0"
 curl "http://localhost:8000/events?event_type=danger_zone&limit=10"
+curl "http://localhost:8000/events?camera_id=gate_01&limit=10"
 curl "http://localhost:8000/events/latest?limit=5"
-curl http://localhost:8000/snapshots/example.jpg
+curl "http://localhost:8000/events/latest?camera_id=gate_01&limit=5"
+curl http://localhost:8000/snapshots/gate_01/example.jpg
 curl http://localhost:8000/stats
 ```
 

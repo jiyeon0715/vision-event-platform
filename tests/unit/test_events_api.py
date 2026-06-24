@@ -13,6 +13,7 @@ from main import app
 class FakeEvent:
     id: int
     event_type: str
+    camera_id: str
     track_id: int
     timestamp: float
     message: str
@@ -22,11 +23,18 @@ class FakeEvent:
 class FakeEventRepository:
     def __init__(self, events: list[FakeEvent]) -> None:
         self.events = events
-        self.list_recent_limits: list[int] = []
+        self.list_recent_calls: list[tuple[int, str | None]] = []
 
-    def list_recent(self, limit: int = 100) -> list[FakeEvent]:
-        self.list_recent_limits.append(limit)
-        return self.events[:limit]
+    def list_recent(
+        self,
+        limit: int = 100,
+        camera_id: str | None = None,
+    ) -> list[FakeEvent]:
+        self.list_recent_calls.append((limit, camera_id))
+        events = self.events
+        if camera_id is not None:
+            events = [event for event in events if event.camera_id == camera_id]
+        return events[:limit]
 
     def get(self, event_id: int) -> FakeEvent | None:
         return next((event for event in self.events if event.id == event_id), None)
@@ -36,6 +44,7 @@ def make_event(event_id: int = 1, created_at: datetime | None = None) -> FakeEve
     return FakeEvent(
         id=event_id,
         event_type="danger_zone",
+        camera_id="gate_01",
         track_id=42,
         timestamp=123.45,
         message="Track 42 stayed inside the danger zone.",
@@ -60,6 +69,7 @@ def test_list_events_returns_recent_events() -> None:
         {
             "id": 1,
             "event_type": "danger_zone",
+            "camera_id": "gate_01",
             "track_id": 42,
             "timestamp": 123.45,
             "message": "Track 42 stayed inside the danger zone.",
@@ -68,13 +78,14 @@ def test_list_events_returns_recent_events() -> None:
         {
             "id": 2,
             "event_type": "danger_zone",
+            "camera_id": "gate_01",
             "track_id": 42,
             "timestamp": 123.45,
             "message": "Track 42 stayed inside the danger zone.",
             "created_at": "2026-06-22T10:30:00Z",
         },
     ]
-    assert repository.list_recent_limits == [100]
+    assert repository.list_recent_calls == [(100, None)]
 
 
 def test_list_events_passes_limit_to_repository() -> None:
@@ -86,7 +97,30 @@ def test_list_events_passes_limit_to_repository() -> None:
     app.dependency_overrides.clear()
     assert response.status_code == 200
     assert [event["id"] for event in response.json()] == [1]
-    assert repository.list_recent_limits == [1]
+    assert repository.list_recent_calls == [(1, None)]
+
+
+def test_list_events_passes_camera_id_to_repository() -> None:
+    repository = FakeEventRepository([make_event(event_id=1), make_event(event_id=2)])
+    client = make_client(repository)
+
+    response = client.get("/events?camera_id=gate_01")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert [event["id"] for event in response.json()] == [1, 2]
+    assert repository.list_recent_calls == [(100, "gate_01")]
+
+
+def test_latest_events_passes_camera_id_to_repository() -> None:
+    repository = FakeEventRepository([make_event(event_id=1)])
+    client = make_client(repository)
+
+    response = client.get("/events/latest?camera_id=gate_01&limit=5")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert repository.list_recent_calls == [(5, "gate_01")]
 
 
 def test_get_event_returns_single_event() -> None:

@@ -12,6 +12,7 @@ from app.database.session import get_session_factory
 
 class EventRecord(Protocol):
     event_type: str
+    camera_id: str
     track_id: int
     timestamp: float
     message: str
@@ -37,8 +38,14 @@ class EventRepository:
     def save(self, event: EventRecord) -> EventModel:
         return self.save_many([event])[0]
 
-    def list_recent(self, limit: int = 100) -> list[EventModel]:
+    def list_recent(
+        self,
+        limit: int = 100,
+        camera_id: str | None = None,
+    ) -> list[EventModel]:
         statement = select(EventModel).order_by(EventModel.created_at.desc()).limit(limit)
+        if camera_id is not None:
+            statement = statement.where(EventModel.camera_id == camera_id)
 
         if self._session is not None:
             return list(self._session.scalars(statement).all())
@@ -67,6 +74,7 @@ class EventRepository:
         models = [
             EventModel(
                 event_type=_event_field(event, "event_type"),
+                camera_id=_event_field(event, "camera_id", "default"),
                 track_id=_event_field(event, "track_id"),
                 timestamp=_event_field(event, "timestamp"),
                 message=_event_field(event, "message"),

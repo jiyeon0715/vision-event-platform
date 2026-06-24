@@ -15,6 +15,7 @@ if ConfigDict is not None:
     class EventResponse(BaseModel):
         id: int
         event_type: str
+        camera_id: str
         track_id: int
         timestamp: float
         message: str
@@ -28,6 +29,7 @@ else:
     class EventResponse(BaseModel):
         id: int
         event_type: str
+        camera_id: str
         track_id: int
         timestamp: float
         message: str

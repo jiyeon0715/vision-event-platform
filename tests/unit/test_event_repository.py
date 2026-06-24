@@ -29,6 +29,7 @@ def make_event(track_id: int = 42) -> Event:
         track_id=track_id,
         timestamp=123.45,
         message=f"Track {track_id} stayed inside the danger zone.",
+        camera_id="gate_01",
     )
 
 
@@ -41,6 +42,7 @@ def test_save_persists_event() -> None:
     persisted = session.scalar(select(EventModel).where(EventModel.id == saved.id))
     assert persisted is not None
     assert persisted.event_type == "danger_zone"
+    assert persisted.camera_id == "gate_01"
     assert persisted.track_id == 42
     assert persisted.timestamp == 123.45
     assert persisted.message == "Track 42 stayed inside the danger zone."
@@ -64,6 +66,7 @@ def test_save_accepts_dict_event_payload() -> None:
     saved = repository.save(
         {
             "event_type": "danger_zone",
+            "camera_id": "gate_02",
             "track_id": 7,
             "timestamp": 12.3,
             "message": "Track 7 stayed inside the danger zone.",
@@ -74,6 +77,7 @@ def test_save_accepts_dict_event_payload() -> None:
     persisted = session.get(EventModel, saved.id)
     assert persisted is not None
     assert persisted.track_id == 7
+    assert persisted.camera_id == "gate_02"
     assert persisted.snapshot_path == "data/snapshots/event.jpg"
 
 
@@ -90,6 +94,7 @@ def test_list_recent_returns_newest_events_first() -> None:
     repository = EventRepository(session=session)
     older = EventModel(
         event_type="danger_zone",
+        camera_id="gate_01",
         track_id=1,
         timestamp=1.0,
         message="Older event",
@@ -97,6 +102,7 @@ def test_list_recent_returns_newest_events_first() -> None:
     )
     newer = EventModel(
         event_type="danger_zone",
+        camera_id="gate_02",
         track_id=2,
         timestamp=2.0,
         message="Newer event",
@@ -108,6 +114,26 @@ def test_list_recent_returns_newest_events_first() -> None:
     events = repository.list_recent(limit=1)
 
     assert [event.track_id for event in events] == [2]
+
+
+def test_list_recent_filters_by_camera_id() -> None:
+    session = make_session()
+    repository = EventRepository(session=session)
+    repository.save(make_event(track_id=1))
+    repository.save(
+        Event(
+            event_type="danger_zone",
+            track_id=2,
+            timestamp=123.45,
+            message="Track 2 stayed inside the danger zone.",
+            camera_id="gate_02",
+        )
+    )
+
+    events = repository.list_recent(camera_id="gate_02")
+
+    assert [event.track_id for event in events] == [2]
+    assert [event.camera_id for event in events] == ["gate_02"]
 
 
 def test_get_returns_event_by_id() -> None:
