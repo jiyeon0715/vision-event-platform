@@ -18,6 +18,10 @@ Rule Engine
     ├─ LoiteringRule
     └─ PersonCountRule
     ↓
+AlertPolicy
+    ↓
+Snapshot
+    ↓
 Event Service
     ↓
 PostgreSQL
@@ -28,8 +32,9 @@ FastAPI API
 The event evaluation layer is plugin-based. `VisionEventPipeline` detects and
 tracks each frame once, then passes the same track list to every enabled rule
 loaded from `config/config.yaml`. Each rule implements `BaseRule.evaluate()` and
-returns the same event model, so event persistence and API responses remain
-unchanged.
+returns the same event model. `AlertPolicy` then throttles duplicate alerts
+before persistence, printing, and snapshot creation, so rules can keep evaluating
+every frame without flooding the database or dashboard.
 
 ```mermaid
 flowchart TD
@@ -43,10 +48,22 @@ flowchart TD
     I --> D
     I --> E
     I --> F
-    D --> J["Combined events"]
+    D --> J["Combined rule events"]
     E --> J
     F --> J
-    J --> K["EventRepository.save_many()"]
+    J --> K["AlertPolicy"]
+    K --> L["Snapshot"]
+    L --> M["DB/API/Dashboard"]
+```
+
+```mermaid
+flowchart LR
+    A["Frame"] --> B["Detection"]
+    B --> C["Tracking"]
+    C --> D["Rules"]
+    D --> E["AlertPolicy"]
+    E --> F["Snapshot"]
+    F --> G["DB/API/Dashboard"]
 ```
 
 ## Features
@@ -140,9 +157,20 @@ python scripts/run_video.py /path/to/video.mp4 --save-events --snapshot-dir data
 ## Rule Configuration
 
 Rules are loaded from `config/config.yaml`. Multiple enabled rules run on the
-same tracked frame, and their emitted events are combined before persistence.
+same tracked frame, and their emitted events are combined before `AlertPolicy`
+decides which ones should be emitted.
 
 ```yaml
+alert_policy:
+  default_cooldown_sec: 10
+  rules:
+    danger_zone:
+      cooldown_sec: 10
+    loitering:
+      cooldown_sec: 30
+    person_count:
+      cooldown_sec: 15
+
 rules:
   - type: danger_zone
     enabled: true
@@ -164,6 +192,16 @@ rules:
       threshold: 5
       notify_interval_sec: 30
 ```
+
+Alert policy behavior:
+
+- The first event for a deduplication key is emitted immediately.
+- Repeated events inside the cooldown window are suppressed and are not printed,
+  saved to SQLite, or given snapshots.
+- Deduplication prefers `camera_id + rule_name + track_id`, falls back to
+  `camera_id + rule_name` when `track_id` is missing, and uses
+  `rule_name + track_id` or `rule_name` when `camera_id` is missing.
+- Rule-specific `cooldown_sec` values override `default_cooldown_sec`.
 
 Rule behavior:
 

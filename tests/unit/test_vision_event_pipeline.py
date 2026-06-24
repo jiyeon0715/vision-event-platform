@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 from app.detector.yolo_detector import Detection
+from app.pipeline.alert_policy import AlertPolicy
 from app.pipeline.vision_event_pipeline import VisionEventPipeline
 from app.rules.danger_zone_rule import Event
 from app.tracker.bytetrack_tracker import Track
@@ -163,6 +164,31 @@ def test_process_frame_runs_multiple_rules_on_same_frame() -> None:
     assert event_repository.save_many_calls == [[first_event, second_event]]
 
 
+def test_process_frame_suppresses_events_rejected_by_alert_policy() -> None:
+    recorder = CallRecorder(calls=[])
+    detections = [make_detection()]
+    tracks = [make_track()]
+    first_event = make_event(timestamp=1.0)
+    repeated_event = make_event(timestamp=5.0)
+    rule = MockRule(events=[first_event], recorder=recorder)
+    event_repository = MockEventRepository()
+    pipeline = VisionEventPipeline(
+        detector=MockDetector(detections=detections, recorder=recorder),
+        tracker=MockTracker(tracks=tracks, recorder=recorder),
+        rules=[rule],
+        event_repository=event_repository,
+        alert_policy=AlertPolicy(default_cooldown_sec=10),
+    )
+
+    first_result = pipeline.process_frame(frame=object(), timestamp=1.0)
+    rule.events = [repeated_event]
+    second_result = pipeline.process_frame(frame=object(), timestamp=5.0)
+
+    assert first_result == [first_event]
+    assert second_result == []
+    assert event_repository.save_many_calls == [[first_event], []]
+
+
 def test_pipeline_constructs_default_components() -> None:
     detector = MagicMock()
     tracker = MagicMock()
@@ -186,6 +212,10 @@ def test_pipeline_constructs_default_components() -> None:
             "app.pipeline.vision_event_pipeline._default_event_repository",
             return_value=event_repository,
         ) as default_repository,
+        patch(
+            "app.pipeline.vision_event_pipeline._default_alert_policy",
+            return_value=AlertPolicy(),
+        ) as default_alert_policy,
     ):
         pipeline = VisionEventPipeline()
 
@@ -194,7 +224,9 @@ def test_pipeline_constructs_default_components() -> None:
     assert pipeline._rules == rules
     assert pipeline._danger_zone_rule is rules[0]
     assert pipeline._event_repository is event_repository
+    assert isinstance(pipeline._alert_policy, AlertPolicy)
     detector_cls.assert_called_once_with()
     tracker_cls.assert_called_once_with()
     loader.assert_called_once_with()
     default_repository.assert_called_once_with()
+    default_alert_policy.assert_called_once_with()

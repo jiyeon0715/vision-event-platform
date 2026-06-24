@@ -22,6 +22,16 @@ event:
   threshold_sec: 3
   notify_interval_sec: 60
 
+alert_policy:
+  default_cooldown_sec: 10
+  rules:
+    danger_zone:
+      cooldown_sec: 10
+    loitering:
+      cooldown_sec: 30
+    person_count:
+      cooldown_sec: 15
+
 rules:
   - type: danger_zone
     enabled: true

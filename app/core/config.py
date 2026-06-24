@@ -76,12 +76,43 @@ class RuleSettings:
 
 
 @dataclass(frozen=True)
+class AlertPolicyRuleSettings:
+    cooldown_sec: float | None = None
+
+
+@dataclass(frozen=True)
+class AlertPolicySettings:
+    default_cooldown_sec: float = 0.0
+    rules: Mapping[str, AlertPolicyRuleSettings] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        parsed_rules = {}
+        for rule_name, rule_config in (self.rules or {}).items():
+            if isinstance(rule_config, AlertPolicyRuleSettings):
+                parsed_rules[rule_name] = rule_config
+            elif isinstance(rule_config, Mapping):
+                parsed_rules[rule_name] = AlertPolicyRuleSettings(**rule_config)
+            else:
+                raise ValueError(
+                    "Each alert policy rule configuration must be a mapping"
+                )
+
+        object.__setattr__(
+            self,
+            "default_cooldown_sec",
+            float(self.default_cooldown_sec),
+        )
+        object.__setattr__(self, "rules", parsed_rules)
+
+
+@dataclass(frozen=True)
 class Settings:
     app: AppSettings
     database: DatabaseSettings
     yolo: YoloSettings
     tracker: TrackerSettings
     event: EventSettings
+    alert_policy: AlertPolicySettings = field(default_factory=AlertPolicySettings)
     rules: tuple[RuleSettings, ...] = ()
 
 
@@ -217,6 +248,16 @@ def _rules(config_data: Mapping[str, Any]) -> tuple[RuleSettings, ...]:
     return tuple(parsed_rules)
 
 
+def _alert_policy(config_data: Mapping[str, Any]) -> AlertPolicySettings:
+    alert_policy = config_data.get("alert_policy", {})
+    if alert_policy in (None, {}):
+        return AlertPolicySettings()
+    if not isinstance(alert_policy, Mapping):
+        raise ValueError("Configuration section must be a mapping: alert_policy")
+
+    return AlertPolicySettings(**alert_policy)
+
+
 def load_settings(
     config_path: Path = CONFIG_PATH,
     environ: Mapping[str, str] | None = None,
@@ -234,6 +275,7 @@ def load_settings(
         yolo=YoloSettings(**_section(config_data, "yolo")),
         tracker=TrackerSettings(**_section(config_data, "tracker")),
         event=EventSettings(**_section(config_data, "event")),
+        alert_policy=_alert_policy(config_data),
         rules=_rules(config_data),
     )
 

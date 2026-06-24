@@ -37,6 +37,13 @@ rules:
     config:
       threshold: 2
       notify_interval_sec: 5
+alert_policy:
+  default_cooldown_sec: 10
+  rules:
+    danger_zone:
+      cooldown_sec: 10
+    loitering:
+      cooldown_sec: 30
 """.lstrip(),
         encoding="utf-8",
     )
@@ -64,6 +71,9 @@ def test_load_settings_from_yaml(tmp_path: Path) -> None:
     assert settings.event.threshold_sec == 3
     assert settings.event.notify_interval_sec == 20
     assert settings.event.cooldown_seconds == 15
+    assert settings.alert_policy.default_cooldown_sec == 10
+    assert settings.alert_policy.rules["danger_zone"].cooldown_sec == 10
+    assert settings.alert_policy.rules["loitering"].cooldown_sec == 30
     assert [rule.type for rule in settings.rules] == ["danger_zone", "person_count"]
     assert settings.rules[0].enabled is True
     assert settings.rules[0].config["threshold_sec"] == 3
