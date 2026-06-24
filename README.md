@@ -127,6 +127,7 @@ Health check:
 
 ```bash
 curl http://localhost:8000/health
+curl http://localhost:8000/health/db
 ```
 
 The app reads database settings from `config/config.yaml` by default. Set
@@ -172,10 +173,45 @@ Compose starts a `postgres` service and passes this URL to the app:
 DATABASE_URL=postgresql://vision:vision@postgres:5432/vision_events
 ```
 
-PostgreSQL data is stored in the named `postgres_data` volume. Snapshot files
-are mounted from the host at `./data/snapshots` into the app container at
-`/app/data/snapshots`, so event snapshot JPEGs remain available after the
-container is recreated.
+PostgreSQL data is stored in the named `postgres_data` volume. The host `./data`
+directory is mounted into the app container at `/app/data`, so local videos and
+event snapshot JPEGs are available to the container.
+
+Verify PostgreSQL event persistence end to end:
+
+```bash
+docker compose up --build
+```
+
+In another shell, place a video under `data/videos/`, then run the pipeline
+inside the app container. The container already has `DATABASE_URL` set to the
+Compose PostgreSQL service, so `--save-events` writes through the SQLAlchemy
+PostgreSQL repository:
+
+```bash
+docker compose exec app python scripts/run_video.py /app/data/videos/sample.mp4 --save-events
+```
+
+Check the latest persisted events through the API:
+
+```bash
+curl "http://localhost:8000/events/latest?limit=5"
+```
+
+Restart the containers without removing volumes:
+
+```bash
+docker compose restart app postgres
+```
+
+Confirm the same events remain after restart:
+
+```bash
+curl "http://localhost:8000/events/latest?limit=5"
+```
+
+The startup logs include the active database backend and a redacted database URL,
+for example `Database backend active: postgresql (...)`.
 
 Run the local video pipeline against a video file:
 
@@ -193,7 +229,9 @@ Save emitted events to a local SQLite database while still printing JSON lines:
 python scripts/run_video.py /path/to/video.mp4 --save-events --db-path data/events.db
 ```
 
-If `--db-path` is omitted, the video runner writes to `data/events.db`.
+If `DATABASE_URL` is set, `--save-events` writes to that SQLAlchemy database URL.
+If no database URL is set, the video runner keeps the local SQLite behavior and
+writes to `data/events.db` unless `--db-path` is provided.
 When the runner emits an event, it writes the current frame to
 `data/snapshots/` as a JPEG and stores the snapshot path with the saved event.
 Use `--snapshot-dir` to choose a different local snapshot directory:

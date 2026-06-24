@@ -21,6 +21,20 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@router.get("/health/db", tags=["health"])
+async def database_health_check() -> dict[str, str]:
+    """Return database connectivity status."""
+    from app.database.health import check_database_health
+
+    result = check_database_health()
+    if result["status"] != "ok":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=result,
+        )
+    return result
+
+
 def get_event_repository() -> EventReader:
     from app.repositories.event_repository import EventRepository
 
@@ -38,6 +52,20 @@ async def list_events(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[object]:
     """Return recent events ordered by creation time."""
+    return repository.list_recent(limit=limit)
+
+
+@router.get(
+    "/events/latest",
+    response_model=list[EventResponse],
+    response_model_exclude_none=True,
+    tags=["events"],
+)
+async def list_latest_events(
+    repository: Annotated[EventReader, Depends(get_event_repository)],
+    limit: Annotated[int, Query(ge=1, le=500)] = 10,
+) -> list[object]:
+    """Return the latest persisted events."""
     return repository.list_recent(limit=limit)
 
 

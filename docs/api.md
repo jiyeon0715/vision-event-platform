@@ -8,6 +8,21 @@ This document will describe the platform API.
 
 Returns a basic health check response.
 
+`GET /health/db`
+
+Returns database connectivity status and the active backend.
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "backend": "postgresql"
+}
+```
+
+Returns `503` when the database cannot be reached.
+
 ## Events
 
 ### `GET /events`
@@ -32,6 +47,11 @@ Response:
   }
 ]
 ```
+
+### `GET /events/latest`
+
+Returns the latest persisted events ordered by creation time, newest first.
+Defaults to `limit=10`; allowed range is `1` to `500`.
 
 ### `GET /events/{event_id}`
 

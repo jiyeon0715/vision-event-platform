@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, is_dataclass, replace
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -13,7 +14,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.pipeline.vision_event_pipeline import VisionEventPipeline
-from storage.event_repository import EventRepository
+from app.database.urls import database_backend, redact_database_url
+from storage.event_repository import EventRepository as SqliteEventRepository
 
 DEFAULT_SNAPSHOT_DIR = Path("data/snapshots")
 
@@ -35,13 +37,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--save-events",
         action="store_true",
-        help="Save emitted events to SQLite in addition to printing them.",
+        help="Save emitted events in addition to printing them.",
+    )
+    parser.add_argument(
+        "--database-url",
+        default=os.environ.get("DATABASE_URL"),
+        help=(
+            "SQLAlchemy database URL used with --save-events. Defaults to "
+            "DATABASE_URL when set; otherwise --db-path SQLite is used."
+        ),
     )
     parser.add_argument(
         "--db-path",
         type=Path,
         default=Path("data/events.db"),
-        help="SQLite database path used with --save-events.",
+        help="SQLite database path used with --save-events when no database URL is set.",
     )
     parser.add_argument(
         "--snapshot-dir",
@@ -66,7 +76,7 @@ def main() -> int:
         return 1
 
     pipeline = VisionEventPipeline(event_repository=_NoOpEventRepository())
-    event_repository = EventRepository(args.db_path) if args.save_events else None
+    event_repository = _build_event_repository(args) if args.save_events else None
     snapshot_dir = args.snapshot_dir
     fps = capture.get(cv2.CAP_PROP_FPS) or 0.0
     frame_index = 0
@@ -93,6 +103,37 @@ def main() -> int:
         capture.release()
 
     return 0
+
+
+def _build_event_repository(args: argparse.Namespace) -> Any:
+    if args.database_url:
+        from app.core.config import get_settings
+        from app.database.health import initialize_database
+        from app.database.session import create_session_factory
+        from app.repositories.event_repository import EventRepository
+
+        settings = get_settings()
+        database_settings = replace(settings.database, url=args.database_url)
+        session_factory = create_session_factory(
+            replace(settings, database=database_settings)
+        )
+        initialize_database(bind_from_session_factory(session_factory))
+        print(
+            "Saving events to "
+            f"{database_backend(args.database_url)} ({redact_database_url(args.database_url)})",
+            file=sys.stderr,
+        )
+        return EventRepository(session_factory=session_factory)
+
+    print(f"Saving events to SQLite ({args.db_path})", file=sys.stderr)
+    return SqliteEventRepository(args.db_path)
+
+
+def bind_from_session_factory(session_factory: Any) -> Any:
+    bind = session_factory.kw["bind"]
+    if bind is None:
+        raise RuntimeError("Session factory is missing a database bind")
+    return bind
 
 
 def _frame_timestamp(capture: cv2.VideoCapture, frame_index: int, fps: float) -> float:

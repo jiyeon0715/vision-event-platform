@@ -57,6 +57,26 @@ def test_save_many_persists_multiple_events() -> None:
     assert [event.track_id for event in persisted] == [1, 2]
 
 
+def test_save_accepts_dict_event_payload() -> None:
+    session = make_session()
+    repository = EventRepository(session=session)
+
+    saved = repository.save(
+        {
+            "event_type": "danger_zone",
+            "track_id": 7,
+            "timestamp": 12.3,
+            "message": "Track 7 stayed inside the danger zone.",
+            "snapshot_path": "data/snapshots/event.jpg",
+        }
+    )
+
+    persisted = session.get(EventModel, saved.id)
+    assert persisted is not None
+    assert persisted.track_id == 7
+    assert persisted.snapshot_path == "data/snapshots/event.jpg"
+
+
 def test_save_many_ignores_empty_event_list() -> None:
     session = make_session()
     repository = EventRepository(session=session)

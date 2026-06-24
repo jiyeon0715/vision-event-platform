@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Protocol
 
 from sqlalchemy import select
@@ -66,11 +66,11 @@ class EventRepository:
 
         models = [
             EventModel(
-                event_type=event.event_type,
-                track_id=event.track_id,
-                timestamp=event.timestamp,
-                message=event.message,
-                snapshot_path=getattr(event, "snapshot_path", None),
+                event_type=_event_field(event, "event_type"),
+                track_id=_event_field(event, "track_id"),
+                timestamp=_event_field(event, "timestamp"),
+                message=_event_field(event, "message"),
+                snapshot_path=_event_field(event, "snapshot_path", None),
             )
             for event in event_list
         ]
@@ -89,3 +89,9 @@ class EventRepository:
             for model in models:
                 session.refresh(model)
             return models
+
+
+def _event_field(event: EventRecord, field_name: str, default: object = None) -> object:
+    if isinstance(event, Mapping):
+        return event.get(field_name, default)
+    return getattr(event, field_name, default)
