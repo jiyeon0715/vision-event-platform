@@ -4,19 +4,12 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from app.core.config import Settings, get_settings
+from app.rules.base import BaseRule, Event
 from app.tracker.bytetrack_tracker import Track
 
 
 Point = tuple[float, float]
 Polygon = Sequence[Point]
-
-
-@dataclass(frozen=True)
-class Event:
-    event_type: str
-    track_id: int
-    timestamp: float
-    message: str
 
 
 @dataclass
@@ -27,7 +20,7 @@ class PersonState:
     is_inside: bool
 
 
-class DangerZoneRule:
+class DangerZoneRule(BaseRule):
     """Evaluate tracked people against a configured danger zone polygon."""
 
     def __init__(

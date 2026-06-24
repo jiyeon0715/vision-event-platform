@@ -13,13 +13,40 @@ YOLO Detector
     ↓
 ByteTrack Tracker
     ↓
-Event Evaluator
+Rule Engine
+    ├─ DangerZoneRule
+    ├─ LoiteringRule
+    └─ PersonCountRule
     ↓
 Event Service
     ↓
 PostgreSQL
     ↓
 FastAPI API
+```
+
+The event evaluation layer is plugin-based. `VisionEventPipeline` detects and
+tracks each frame once, then passes the same track list to every enabled rule
+loaded from `config/config.yaml`. Each rule implements `BaseRule.evaluate()` and
+returns the same event model, so event persistence and API responses remain
+unchanged.
+
+```mermaid
+flowchart TD
+    A["config/config.yaml"] --> B["load_rules()"]
+    B --> C["BaseRule plugins"]
+    C --> D["DangerZoneRule"]
+    C --> E["LoiteringRule"]
+    C --> F["PersonCountRule"]
+    G["VisionEventPipeline.process_frame()"] --> H["YOLO detections"]
+    H --> I["ByteTrack tracks"]
+    I --> D
+    I --> E
+    I --> F
+    D --> J["Combined events"]
+    E --> J
+    F --> J
+    J --> K["EventRepository.save_many()"]
 ```
 
 ## Features
@@ -35,12 +62,13 @@ FastAPI API
 - SQLite event persistence
 - Read-only saved event API
 - Event frame snapshot storage and dashboard thumbnails
+- Plugin-based rule engine
+- Danger zone, loitering, and person-count rules
 
 ### Planned
 
 - YOLO object detection
 - ByteTrack object tracking
-- Danger zone event detection
 - Event persistence
 - Event query APIs
 - Dashboard integration
@@ -108,6 +136,46 @@ Use `--snapshot-dir` to choose a different local snapshot directory:
 ```bash
 python scripts/run_video.py /path/to/video.mp4 --save-events --snapshot-dir data/snapshots
 ```
+
+## Rule Configuration
+
+Rules are loaded from `config/config.yaml`. Multiple enabled rules run on the
+same tracked frame, and their emitted events are combined before persistence.
+
+```yaml
+rules:
+  - type: danger_zone
+    enabled: true
+    config:
+      danger_zone: [[100, 100], [500, 100], [500, 500], [100, 500]]
+      threshold_sec: 3
+      notify_interval_sec: 60
+
+  - type: loitering
+    enabled: true
+    config:
+      roi: [[120, 120], [480, 120], [480, 480], [120, 480]]
+      threshold_sec: 10
+      notify_interval_sec: 60
+
+  - type: person_count
+    enabled: true
+    config:
+      threshold: 5
+      notify_interval_sec: 30
+```
+
+Rule behavior:
+
+- `danger_zone`: emits `danger_zone` when a person remains inside the configured
+  polygon longer than `threshold_sec`.
+- `loitering`: emits `loitering` when a person remains inside the configured ROI
+  for `threshold_sec`.
+- `person_count`: emits `person_count` when the number of tracked people exceeds
+  `threshold`.
+
+To add another rule, create a class that extends `BaseRule`, implement
+`evaluate(tracks, timestamp)`, and register its `type` in the rule loader.
 
 List saved SQLite events as JSON lines:
 

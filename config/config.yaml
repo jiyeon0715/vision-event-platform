@@ -21,3 +21,22 @@ event:
   danger_zone: [[100, 100], [500, 100], [500, 500], [100, 500]]
   threshold_sec: 3
   notify_interval_sec: 60
+
+rules:
+  - type: danger_zone
+    enabled: true
+    config:
+      danger_zone: [[100, 100], [500, 100], [500, 500], [100, 500]]
+      threshold_sec: 3
+      notify_interval_sec: 60
+  - type: loitering
+    enabled: true
+    config:
+      roi: [[120, 120], [480, 120], [480, 480], [120, 480]]
+      threshold_sec: 10
+      notify_interval_sec: 60
+  - type: person_count
+    enabled: true
+    config:
+      threshold: 5
+      notify_interval_sec: 30

@@ -25,6 +25,18 @@ event:
   notify_interval_sec: 20
   danger_zone_threshold: 0.9
   cooldown_seconds: 15
+rules:
+  - type: danger_zone
+    enabled: true
+    config:
+      danger_zone: [[0, 0], [10, 0], [10, 10], [0, 10]]
+      threshold_sec: 3
+      notify_interval_sec: 20
+  - type: person_count
+    enabled: false
+    config:
+      threshold: 2
+      notify_interval_sec: 5
 """.lstrip(),
         encoding="utf-8",
     )
@@ -52,6 +64,11 @@ def test_load_settings_from_yaml(tmp_path: Path) -> None:
     assert settings.event.threshold_sec == 3
     assert settings.event.notify_interval_sec == 20
     assert settings.event.cooldown_seconds == 15
+    assert [rule.type for rule in settings.rules] == ["danger_zone", "person_count"]
+    assert settings.rules[0].enabled is True
+    assert settings.rules[0].config["threshold_sec"] == 3
+    assert settings.rules[1].enabled is False
+    assert settings.rules[1].config["threshold"] == 2
 
 
 def test_database_url_can_be_overridden_by_environment(tmp_path: Path) -> None:

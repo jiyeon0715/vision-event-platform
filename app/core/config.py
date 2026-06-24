@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from ast import literal_eval
@@ -66,12 +66,23 @@ class EventSettings:
 
 
 @dataclass(frozen=True)
+class RuleSettings:
+    type: str
+    enabled: bool = True
+    config: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "config", dict(self.config or {}))
+
+
+@dataclass(frozen=True)
 class Settings:
     app: AppSettings
     database: DatabaseSettings
     yolo: YoloSettings
     tracker: TrackerSettings
     event: EventSettings
+    rules: tuple[RuleSettings, ...] = ()
 
 
 def _read_yaml(config_path: Path) -> Mapping[str, Any]:
@@ -87,24 +98,69 @@ def _read_yaml(config_path: Path) -> Mapping[str, Any]:
     return config_data
 
 
-def _read_simple_yaml(config_text: str) -> dict[str, dict[str, Any]]:
-    config_data: dict[str, dict[str, Any]] = {}
-    current_section: str | None = None
+def _read_simple_yaml(config_text: str) -> dict[str, Any]:
+    lines = [
+        (len(line) - len(line.lstrip(" ")), line.strip())
+        for line in config_text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
 
-    for line in config_text.splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
+    def parse_mapping(index: int, indent: int) -> tuple[dict[str, Any], int]:
+        result: dict[str, Any] = {}
+        while index < len(lines):
+            current_indent, text = lines[index]
+            if current_indent < indent or text.startswith("- "):
+                break
+            if current_indent > indent:
+                raise ValueError("Invalid indentation in configuration file")
 
-        if not line.startswith(" "):
-            current_section = line.rstrip(":")
-            config_data[current_section] = {}
-            continue
+            key, value = text.split(":", maxsplit=1)
+            value = value.strip()
+            index += 1
+            if value:
+                result[key] = _parse_scalar(value)
+                continue
 
-        if current_section is None:
-            raise ValueError("Configuration values must be nested under a section")
+            if index >= len(lines) or lines[index][0] <= current_indent:
+                result[key] = {}
+                continue
 
-        key, value = line.strip().split(":", maxsplit=1)
-        config_data[current_section][key] = _parse_scalar(value.strip())
+            next_indent, next_text = lines[index]
+            if next_text.startswith("- "):
+                result[key], index = parse_list(index, next_indent)
+            else:
+                result[key], index = parse_mapping(index, next_indent)
+
+        return result, index
+
+    def parse_list(index: int, indent: int) -> tuple[list[dict[str, Any]], int]:
+        result: list[dict[str, Any]] = []
+        while index < len(lines):
+            current_indent, text = lines[index]
+            if current_indent < indent:
+                break
+            if current_indent != indent or not text.startswith("- "):
+                raise ValueError("Invalid list item in configuration file")
+
+            item: dict[str, Any] = {}
+            content = text[2:].strip()
+            index += 1
+            if content:
+                key, value = content.split(":", maxsplit=1)
+                item[key] = _parse_scalar(value.strip())
+
+            while index < len(lines) and lines[index][0] > indent:
+                nested_indent = lines[index][0]
+                nested, index = parse_mapping(index, nested_indent)
+                item.update(nested)
+
+            result.append(item)
+
+        return result, index
+
+    config_data, index = parse_mapping(0, 0)
+    if index != len(lines):
+        raise ValueError("Unable to parse configuration file")
 
     return config_data
 
@@ -145,6 +201,22 @@ def _section(config_data: Mapping[str, Any], section_name: str) -> Mapping[str, 
     return section
 
 
+def _rules(config_data: Mapping[str, Any]) -> tuple[RuleSettings, ...]:
+    rules = config_data.get("rules", ())
+    if rules in (None, ()):
+        return ()
+    if not isinstance(rules, list):
+        raise ValueError("Configuration section must be a list: rules")
+
+    parsed_rules = []
+    for rule in rules:
+        if not isinstance(rule, Mapping):
+            raise ValueError("Each rule configuration must be a mapping")
+        parsed_rules.append(RuleSettings(**rule))
+
+    return tuple(parsed_rules)
+
+
 def load_settings(
     config_path: Path = CONFIG_PATH,
     environ: Mapping[str, str] | None = None,
@@ -162,6 +234,7 @@ def load_settings(
         yolo=YoloSettings(**_section(config_data, "yolo")),
         tracker=TrackerSettings(**_section(config_data, "tracker")),
         event=EventSettings(**_section(config_data, "event")),
+        rules=_rules(config_data),
     )
 
 
