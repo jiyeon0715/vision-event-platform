@@ -9,8 +9,7 @@ SQLAlchemy
 # Vision/tracking runtime dependencies.
 opencv-python
 ultralytics
-bytetracker
-
+lapx
 # Runtime database client.
 psycopg[binary]
 
