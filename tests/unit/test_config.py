@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.core.config import load_settings
+from app.database.urls import normalize_database_url
 
 
 def write_config(config_path: Path) -> None:
@@ -91,3 +92,14 @@ def test_database_url_can_be_overridden_by_environment(tmp_path: Path) -> None:
     )
 
     assert settings.database.url == "postgresql://from-env/test"
+
+
+def test_postgresql_database_url_uses_psycopg_driver() -> None:
+    assert (
+        normalize_database_url("postgresql://vision:vision@postgres/vision_events")
+        == "postgresql+psycopg://vision:vision@postgres/vision_events"
+    )
+
+
+def test_sqlite_database_url_is_not_changed() -> None:
+    assert normalize_database_url("sqlite:///data/events.db") == "sqlite:///data/events.db"

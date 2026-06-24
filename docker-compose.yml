@@ -9,6 +9,8 @@ services:
       DATABASE_URL: postgresql://vision:vision@postgres:5432/vision_events
     depends_on:
       - postgres
+    volumes:
+      - ./data/snapshots:/app/data/snapshots
 
   postgres:
     image: postgres:16

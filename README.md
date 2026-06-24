@@ -117,7 +117,7 @@ Install the full runtime dependency set before running the application:
 pip install -r requirements.txt
 ```
 
-Start the original application skeleton:
+Start the FastAPI app locally:
 
 ```bash
 uvicorn main:app --reload
@@ -128,6 +128,54 @@ Health check:
 ```bash
 curl http://localhost:8000/health
 ```
+
+The app reads database settings from `config/config.yaml` by default. Set
+`DATABASE_URL` to override the configured database without editing the file:
+
+```bash
+DATABASE_URL=sqlite:///data/events.db uvicorn main:app --reload
+```
+
+SQLite remains available for local development and tests through standard
+SQLAlchemy SQLite URLs such as `sqlite:///data/events.db`. PostgreSQL URLs can
+use the common `postgresql://...` form; the app selects the psycopg driver at
+runtime.
+
+## Run With Docker
+
+Build the image directly:
+
+```bash
+docker build -f docker/Dockerfile -t vision-event-platform .
+```
+
+Run the FastAPI app container:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e DATABASE_URL=sqlite:///data/events.db \
+  -v "$PWD/data/snapshots:/app/data/snapshots" \
+  vision-event-platform
+```
+
+Build and start the FastAPI app with PostgreSQL:
+
+```bash
+docker compose up --build
+```
+
+The API is exposed at `http://localhost:8000`.
+
+Compose starts a `postgres` service and passes this URL to the app:
+
+```text
+DATABASE_URL=postgresql://vision:vision@postgres:5432/vision_events
+```
+
+PostgreSQL data is stored in the named `postgres_data` volume. Snapshot files
+are mounted from the host at `./data/snapshots` into the app container at
+`/app/data/snapshots`, so event snapshot JPEGs remain available after the
+container is recreated.
 
 Run the local video pipeline against a video file:
 
