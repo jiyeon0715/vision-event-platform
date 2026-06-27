@@ -1,398 +1,398 @@
 # Vision Event Platform
 
-A real-time vision event platform built with YOLO, ByteTrack, FastAPI, PostgreSQL, and Docker.
+A real-time computer vision event platform that turns object detection and tracking output into queryable operational events.
 
-The goal of this project is to transform object detection results into an event-driven system that can be monitored, queried, and managed through APIs.
+The project demonstrates how a video analytics backend can be structured beyond a single model inference script: frames are processed through detection, tracking, configurable rules, alert throttling, snapshot storage, database persistence, and FastAPI endpoints for monitoring and review.
+
+## Project Overview
+
+Vision Event Platform is designed for security, facility operations, and safety-monitoring scenarios where teams need to detect meaningful activity from camera feeds and inspect the resulting events later.
+
+Instead of treating every detection as an alert, the system applies rule-based event evaluation. A camera stream is processed by a YOLO detector, a ByteTrack-style tracker, and one or more configurable rules such as danger-zone entry, loitering, and person-count thresholds. Events are filtered by an alert policy, optionally saved with frame snapshots, and exposed through API endpoints for dashboards or downstream services.
+
+The current implementation supports:
+
+- Single-video and multi-camera local pipeline runs.
+- Config-driven camera and rule definitions.
+- Per-camera health tracking during runtime.
+- SQLite for local development and PostgreSQL for Docker Compose runs.
+- FastAPI endpoints for health checks, event reads, event statistics, and camera health.
+- Snapshot file storage for persisted event review.
 
 ## Architecture
 
-```text
-Multi Camera -> YOLO -> Rule Engine -> Alert Policy -> Snapshot -> DB -> API -> Dashboard
-      |
-      v
-Camera Health / Statistics
-```
-
-The event evaluation layer is plugin-based. Each configured camera gets its own
-`VisionEventPipeline` context with independent detector, tracker, rule, and
-`AlertPolicy` instances. Within that context, the pipeline detects and tracks
-each frame once, then passes the same track list to every enabled rule loaded
-from `config/config.yaml`. Each emitted event is stamped with the camera id
-before alert filtering, persistence, printing, and snapshot creation.
-
 ```mermaid
 flowchart LR
-    A["config/config.yaml cameras[]"] --> B["gate_01 source"]
-    A --> C["gate_02 source"]
-    B --> D["Pipeline context: gate_01"]
-    C --> E["Pipeline context: gate_02"]
-    D --> F["Detector + Tracker + Rules"]
-    E --> G["Detector + Tracker + Rules"]
-    F --> H["gate_01 AlertPolicy"]
-    G --> I["gate_02 AlertPolicy"]
-    H --> J["Events with camera_id"]
-    I --> J
-    B --> N["Camera Health"]
-    C --> N
-    J --> O["Statistics"]
-    J --> K["Camera snapshot folders"]
-    J --> L["SQLite/PostgreSQL"]
-    L --> M["API and Dashboard camera filters"]
-    N --> M
-    O --> M
+    A["Camera sources<br/>config/config.yaml"] --> B["Video runner<br/>scripts/run_video.py"]
+    B --> C["VisionEventPipeline"]
+    C --> D["YOLO detector"]
+    D --> E["ByteTrack tracker"]
+    E --> F["Rule engine<br/>danger zone / loitering / person count"]
+    F --> G["AlertPolicy<br/>cooldown filtering"]
+    G --> H["Event snapshots<br/>data/snapshots/{camera_id}"]
+    G --> I["Event repository<br/>SQLite or PostgreSQL"]
+    C --> J["CameraHealthRegistry"]
+    I --> K["FastAPI"]
+    J --> K
+    K --> L["Dashboard or API clients"]
 ```
 
-```mermaid
-flowchart LR
-    A["Multi Camera"] --> B["YOLO"]
-    B --> C["Rule Engine"]
-    C --> D["Alert Policy"]
-    D --> E["Snapshot"]
-    E --> F["DB"]
-    F --> G["API"]
-    G --> H["Dashboard"]
-    A --> I["Camera Health / Statistics"]
-    D --> I
-    I --> G
-```
+### Request/Data Flow
+
+1. Camera definitions are loaded from `config/config.yaml`, or a legacy single video path is passed on the command line.
+2. The runner creates one `VisionEventPipeline` context per camera.
+3. Each frame is detected once, tracked once, then evaluated by all enabled rules.
+4. Emitted events receive a `camera_id` and pass through `AlertPolicy` cooldown filtering.
+5. Approved events can be printed, saved to the database, and paired with a JPEG snapshot.
+6. FastAPI reads persisted events and aggregate statistics from the database.
+7. Runtime camera health is kept in memory and exposed through `/cameras/health`.
 
 ## Features
 
-### Current
-
-- FastAPI application
-- Health check endpoint
-- Project structure initialization
-- Docker environment
-- PostgreSQL integration skeleton
-- Event processing architecture
-- SQLite event persistence
-- Read-only saved event API
-- Event frame snapshot storage and dashboard thumbnails
-- Multi-camera configuration and camera-filtered event queries
-- Event statistics API with date, camera, and rule filters
-- Runtime camera health monitoring API
-- Dashboard statistics and camera health sections
-- Plugin-based rule engine
-- Danger zone, loitering, and person-count rules
-
-### Planned
-
-- YOLO object detection
-- ByteTrack object tracking
-- Event persistence
-- Event query APIs
-- Dashboard integration
-- CI/CD pipeline
+- **Vision pipeline orchestration**: coordinates detector, tracker, rules, alert policy, persistence, and health reporting.
+- **Plugin-style rule loading**: enables rules from YAML configuration without changing the runner.
+- **Event rules**: supports danger-zone, loitering, and person-count event types.
+- **Alert cooldowns**: prevents repeated notifications for the same rule from flooding storage or clients.
+- **Multi-camera support**: processes configured camera sources and stamps every event with `camera_id`.
+- **Snapshot capture**: writes event frame JPEGs to per-camera folders and stores the snapshot path with the event.
+- **Database abstraction**: supports local SQLite and PostgreSQL through SQLAlchemy URLs.
+- **Operational API**: exposes health checks, event reads, event statistics, and camera health endpoints.
+- **Dockerized runtime**: includes an app container and PostgreSQL service through Docker Compose.
+- **Testable design**: core pipeline, rules, repository behavior, API routes, config loading, and camera health are covered by unit tests.
 
 ## Tech Stack
 
-### Vision
+| Area | Technologies |
+| --- | --- |
+| API | FastAPI, Pydantic, Uvicorn |
+| Vision | OpenCV, Ultralytics YOLO |
+| Tracking | ByteTrack-style tracker, `lapx` |
+| Rules | Config-driven Python rule evaluators |
+| Persistence | SQLAlchemy, SQLite, PostgreSQL, psycopg |
+| Runtime | Python 3.12, Docker, Docker Compose |
+| Testing | pytest, httpx |
 
-- OpenCV
-- YOLO
-- ByteTrack
+## Repository Structure
 
-### Backend
+```text
+app/
+  api/                 FastAPI routes
+  core/                settings and config loading
+  database/            SQLAlchemy models, sessions, health checks
+  detector/            YOLO detector adapter
+  pipeline/            frame-to-event orchestration
+  repositories/        database-backed event repository
+  rules/               event rule evaluators and loader
+  services/            camera health registry and event service
+  tracker/             tracking adapters
+config/config.yaml     camera, rule, alert, and database configuration
+scripts/run_video.py   local and container video pipeline runner
+storage/               local SQLite repository used by runner flows
+tests/                 unit and integration test suite
+docker/Dockerfile      production-like API image
+docker-compose.yml     API + PostgreSQL stack
+```
 
-- FastAPI
-- PostgreSQL
+## Local Run
 
-### DevOps
-
-- Docker
-- GitHub Actions
-
-## Run Locally
-
-Install the full runtime dependency set before running the application:
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Start the FastAPI app locally:
+Start the FastAPI app:
 
 ```bash
 uvicorn main:app --reload
 ```
 
-Health check:
+Check service health:
 
 ```bash
 curl http://localhost:8000/health
 curl http://localhost:8000/health/db
 ```
 
-The app reads database settings from `config/config.yaml` by default. Set
-`DATABASE_URL` to override the configured database without editing the file:
+Use SQLite locally by overriding the configured database URL:
 
 ```bash
 DATABASE_URL=sqlite:///data/events.db uvicorn main:app --reload
 ```
 
-SQLite remains available for local development and tests through standard
-SQLAlchemy SQLite URLs such as `sqlite:///data/events.db`. PostgreSQL URLs can
-use the common `postgresql://...` form; the app selects the psycopg driver at
-runtime.
-
-## Run With Docker
-
-Build the image directly:
-
-```bash
-docker build -f docker/Dockerfile -t vision-event-platform .
-```
-
-Run the FastAPI app container:
-
-```bash
-docker run --rm -p 8000:8000 \
-  -e DATABASE_URL=sqlite:///data/events.db \
-  -v "$PWD/data/snapshots:/app/data/snapshots" \
-  vision-event-platform
-```
-
-Build and start the FastAPI app with PostgreSQL:
-
-```bash
-docker compose up --build
-```
-
-The API is exposed at `http://localhost:8000`.
-
-Compose starts a `postgres` service and passes this URL to the app:
-
-```text
-DATABASE_URL=postgresql://vision:vision@postgres:5432/vision_events
-```
-
-PostgreSQL data is stored in the named `postgres_data` volume. The host `./data`
-directory is mounted into the app container at `/app/data`, so local videos and
-event snapshot JPEGs are available to the container.
-
-Verify PostgreSQL event persistence end to end:
-
-```bash
-docker compose up --build
-```
-
-In another shell, place a video under `data/videos/`, then run the pipeline
-inside the app container. The container already has `DATABASE_URL` set to the
-Compose PostgreSQL service, so `--save-events` writes through the SQLAlchemy
-PostgreSQL repository:
-
-```bash
-docker compose exec app python scripts/run_video.py /app/data/videos/sample.mp4 --save-events
-```
-
-Check the latest persisted events through the API:
-
-```bash
-curl "http://localhost:8000/events/latest?limit=5"
-```
-
-Restart the containers without removing volumes:
-
-```bash
-docker compose restart app postgres
-```
-
-Confirm the same events remain after restart:
-
-```bash
-curl "http://localhost:8000/events/latest?limit=5"
-```
-
-The startup logs include the active database backend and a redacted database URL,
-for example `Database backend active: postgresql (...)`.
-
-Run the local video pipeline against a video file:
-
-```bash
-python scripts/run_video.py /path/to/video.mp4
-```
-
-The legacy single-video command is still supported. Events use
-`camera_id=default` unless `--camera-id` is provided:
+Run the pipeline against one local video:
 
 ```bash
 python scripts/run_video.py /path/to/video.mp4 --camera-id gate_01
 ```
 
-For multi-camera runs, define cameras in `config/config.yaml` and run without a
-positional video path:
+Save emitted events and snapshots locally:
 
-```yaml
-cameras:
-  - id: gate_01
-    source: data/videos/video1.mp4
-
-  - id: gate_02
-    source: data/videos/video2.mp4
+```bash
+python scripts/run_video.py /path/to/video.mp4 \
+  --camera-id gate_01 \
+  --save-events \
+  --db-path data/events.db \
+  --snapshot-dir data/snapshots
 ```
+
+Run configured multi-camera sources:
 
 ```bash
 python scripts/run_video.py --config config/config.yaml
 ```
 
-The runner reads frames with OpenCV, creates one `VisionEventPipeline` per
-camera, prints emitted events to the console, and exits gracefully when each
-source reaches the end of the file.
-
-Save emitted events to a local SQLite database while still printing JSON lines:
-
-```bash
-python scripts/run_video.py /path/to/video.mp4 --save-events --db-path data/events.db
-```
-
-If `DATABASE_URL` is set, `--save-events` writes to that SQLAlchemy database URL.
-If no database URL is set, the video runner keeps the local SQLite behavior and
-writes to `data/events.db` unless `--db-path` is provided.
-When the runner emits an event, it writes the current frame to a per-camera
-snapshot folder such as `data/snapshots/gate_01/` and stores the snapshot path
-with the saved event. The camera folder plus UUID filename avoids collisions
-across sources.
-Use `--snapshot-dir` to choose a different local snapshot directory:
-
-```bash
-python scripts/run_video.py /path/to/video.mp4 --save-events --snapshot-dir data/snapshots
-```
-
-## Rule Configuration
-
-Rules are loaded from `config/config.yaml`. Multiple enabled rules run on the
-same tracked frame, and their emitted events are combined before `AlertPolicy`
-decides which ones should be emitted.
+Example camera configuration:
 
 ```yaml
-alert_policy:
-  default_cooldown_sec: 10
-  rules:
-    danger_zone:
-      cooldown_sec: 10
-    loitering:
-      cooldown_sec: 30
-    person_count:
-      cooldown_sec: 15
-
-rules:
-  - type: danger_zone
-    enabled: true
-    config:
-      danger_zone: [[100, 100], [500, 100], [500, 500], [100, 500]]
-      threshold_sec: 3
-      notify_interval_sec: 60
-
-  - type: loitering
-    enabled: true
-    config:
-      roi: [[120, 120], [480, 120], [480, 480], [120, 480]]
-      threshold_sec: 10
-      notify_interval_sec: 60
-
-  - type: person_count
-    enabled: true
-    config:
-      threshold: 5
-      notify_interval_sec: 30
+cameras:
+  - id: gate_01
+    source: data/videos/video1.mp4
+  - id: gate_02
+    source: data/videos/video2.mp4
 ```
 
-Alert policy behavior:
+## Docker Run
 
-- The first event for a deduplication key is emitted immediately.
-- Repeated events inside the cooldown window are suppressed and are not printed,
-  saved to SQLite, or given snapshots.
-- Deduplication prefers `camera_id + rule_name + track_id`, falls back to
-  `camera_id + rule_name` when `track_id` is missing, and uses
-  `rule_name + track_id` or `rule_name` when `camera_id` is missing.
-- Rule-specific `cooldown_sec` values override `default_cooldown_sec`.
-
-Rule behavior:
-
-- `danger_zone`: emits `danger_zone` when a person remains inside the configured
-  polygon longer than `threshold_sec`.
-- `loitering`: emits `loitering` when a person remains inside the configured ROI
-  for `threshold_sec`.
-- `person_count`: emits `person_count` when the number of tracked people exceeds
-  `threshold`.
-
-To add another rule, create a class that extends `BaseRule`, implement
-`evaluate(tracks, timestamp)`, and register its `type` in the rule loader.
-
-List saved SQLite events as JSON lines:
+Build and run only the API image:
 
 ```bash
-python scripts/list_events.py --db-path data/events.db
+docker build -f docker/Dockerfile -t vision-event-platform .
+
+docker run --rm -p 8000:8000 \
+  -e DATABASE_URL=sqlite:///data/events.db \
+  -v "$PWD/data:/app/data" \
+  vision-event-platform
 ```
 
-Start the read-only saved events API:
+Run the full stack with PostgreSQL:
 
 ```bash
-EVENT_DB_PATH=data/events.db uvicorn api.main:app --reload
+docker compose up --build
 ```
 
-`EVENT_DB_PATH` is optional. If it is not set, the API reads from
-`data/events.db`.
-
-Open the saved events dashboard in a browser:
+The API is available at:
 
 ```text
-http://localhost:8000/
+http://localhost:8000
+```
+
+Docker Compose starts:
+
+- `app`: FastAPI service running `main:app`.
+- `postgres`: PostgreSQL 16 with a health check.
+- `postgres_data`: named volume for durable database data.
+- `./data:/app/data`: bind mount for local videos, SQLite files, and event snapshots.
+
+The app container receives:
+
+```text
+DATABASE_URL=postgresql://vision:vision@postgres:5432/vision_events
+```
+
+Run the video pipeline inside the Compose app container:
+
+```bash
+docker compose exec app python scripts/run_video.py \
+  /app/data/videos/sample.mp4 \
+  --camera-id gate_01 \
+  --save-events
+```
+
+Verify persisted events:
+
+```bash
+curl "http://localhost:8000/events/latest?limit=5"
+```
+
+## Demo Dashboard
+
+The primary API entry point is `main:app`. The repository also includes a lightweight saved-events dashboard in `api.main` for local portfolio demos that read from the runner's SQLite database:
+
+```bash
+EVENT_DB_PATH=data/events.db SNAPSHOT_DIR=data/snapshots uvicorn api.main:app --reload
+```
+
+Open:
+
+```text
 http://localhost:8000/dashboard
 ```
 
-The dashboard is server-rendered by FastAPI. It shows service status, today's
-event count, events by rule, events by camera, recent event time, runtime camera
-health, and the latest saved events from the same SQLite database used by the
-API. Latest events include `camera_id` and a Snapshot column with a thumbnail
-when `snapshot_path` is present. Add `?camera_id=gate_01` to scope the dashboard
-to one camera. Clicking a thumbnail opens the full-size JPEG from
-`GET /snapshots/{camera_id}/{filename}`. Missing snapshot files return a 404
-from the snapshot endpoint and do not prevent the dashboard from rendering.
+The dashboard renders service status, event counts by rule and camera, current camera health, recent saved events, and snapshot thumbnails when `snapshot_path` is present.
 
-Operational dashboards need statistics and camera health because saved events
-alone are not enough to run a monitoring system. Operators need to see whether
-alerts are spiking by rule, whether one camera is generating unusual volume, and
-whether a quiet camera is genuinely safe or simply offline. The health endpoint
-tracks current process memory only: `last_frame_at`, `last_event_at`, frame and
-event counters, status, source, and last error reset when the API or runner
-process restarts. Historical health storage can be added later if uptime
-reporting becomes a requirement.
+## API Examples
 
-The dashboard is intentionally REST-based for now. Real-time push is not
-implemented; if needed later, Server-Sent Events can be added without changing
-the read-heavy statistics and health endpoints.
-
-Example API requests:
+### Health
 
 ```bash
 curl http://localhost:8000/health
-curl "http://localhost:8000/events?limit=25&offset=0"
-curl "http://localhost:8000/events?event_type=danger_zone&limit=10"
-curl "http://localhost:8000/events?camera_id=gate_01&limit=10"
-curl "http://localhost:8000/events/latest?limit=5"
-curl "http://localhost:8000/events/latest?camera_id=gate_01&limit=5"
-curl http://localhost:8000/snapshots/gate_01/example.jpg
-curl http://localhost:8000/stats
-curl http://localhost:8000/events/stats
-curl "http://localhost:8000/events/stats?camera_id=gate_01"
-curl "http://localhost:8000/events/stats?rule_name=danger_zone"
-curl "http://localhost:8000/events/stats?start_at=2026-06-22T00:00:00Z&end_at=2026-06-23T00:00:00Z"
+```
+
+```json
+{
+  "status": "ok"
+}
+```
+
+```bash
+curl http://localhost:8000/health/db
+```
+
+```json
+{
+  "status": "ok",
+  "backend": "postgresql"
+}
+```
+
+### Latest Events
+
+```bash
+curl "http://localhost:8000/events/latest?limit=5&camera_id=gate_01"
+```
+
+```json
+[
+  {
+    "id": 1,
+    "event_type": "danger_zone",
+    "camera_id": "gate_01",
+    "track_id": 42,
+    "timestamp": 123.45,
+    "message": "Track 42 stayed inside the danger zone.",
+    "snapshot_path": "data/snapshots/gate_01/2f7c6f6d0a7f4f94a6a0c1fd7b7d9e91.jpg",
+    "created_at": "2026-06-22T10:30:00Z"
+  }
+]
+```
+
+### Single Event
+
+```bash
+curl http://localhost:8000/events/1
+```
+
+### Event Statistics
+
+```bash
+curl "http://localhost:8000/events/stats?camera_id=gate_01&rule_name=danger_zone"
+```
+
+```json
+{
+  "total_event_count": 12,
+  "event_count_by_rule_name": {
+    "danger_zone": 12
+  },
+  "event_count_by_camera_id": {
+    "gate_01": 12
+  },
+  "hourly_event_counts": {
+    "2026-06-22T10:00:00Z": 7,
+    "2026-06-22T11:00:00Z": 5
+  },
+  "latest_event_timestamp": "2026-06-22T11:14:08Z"
+}
+```
+
+### Camera Health
+
+```bash
 curl http://localhost:8000/cameras/health
 ```
 
-## Tests
+```json
+[
+  {
+    "camera_id": "gate_01",
+    "source": "data/videos/video1.mp4",
+    "status": "online",
+    "last_frame_at": "2026-06-22T10:30:00Z",
+    "last_event_at": "2026-06-22T10:30:03Z",
+    "processed_frame_count": 1800,
+    "emitted_event_count": 4,
+    "last_error": null
+  }
+]
+```
 
-GitHub Actions installs the lean unit-test dependency set from `requirements-ci.txt`.
-The full local runtime stack, including OpenCV, Ultralytics, ByteTrack, and psycopg,
-remains documented in `requirements.txt`.
+## Screenshots and Snapshots
+
+This repository stores event evidence as generated image snapshots rather than committed demo screenshots.
+
+When `scripts/run_video.py` emits an event, it writes the current frame as a JPEG under:
+
+```text
+data/snapshots/{camera_id}/{uuid}.jpg
+```
+
+The saved event stores that location in `snapshot_path`, allowing an API client or dashboard to show a thumbnail beside the event metadata. The per-camera folder structure makes it easy to inspect events by source and avoids filename collisions when multiple cameras emit events at the same time.
+
+Because snapshots are generated from local video inputs, `data/snapshots/.gitkeep` is committed but generated JPEGs are expected to remain local runtime artifacts.
+
+## Testing Result
+
+The test suite is organized around unit coverage for the behavior that matters most in an interview or production-readiness review:
+
+- Pipeline orchestration and camera id propagation.
+- Danger-zone, loitering, and person-count rule behavior.
+- Alert cooldown policy.
+- SQLite and SQLAlchemy event repository behavior.
+- Saved event API responses and query filtering.
+- Event statistics API behavior.
+- Runtime camera health state.
+- Configuration loading.
+- Snapshot path creation in the video runner.
+- Database health checks.
+
+Run tests with:
+
+```bash
+pytest
+```
+
+For lighter CI environments that should avoid native vision/tracking dependency builds:
 
 ```bash
 pip install -r requirements-ci.txt
 pytest
 ```
 
-## Project Status
+Documentation-only note: this README polish did not require running application code or the test suite.
 
-🚧 Under Active Development
+## Future Improvements
+
+- Add a small dashboard frontend that renders event lists, statistics, camera health, and snapshot thumbnails.
+- Serve snapshot files through authenticated API endpoints instead of exposing filesystem paths directly.
+- Add async or background worker execution for long-running camera streams.
+- Support RTSP camera sources and reconnection/backoff policies.
+- Persist camera health history for operational trend analysis.
+- Add event acknowledgement, severity, and review workflow fields.
+- Add migrations with Alembic for production database changes.
+- Add CI jobs for linting, unit tests, Docker image build, and API smoke tests.
+- Add model configuration profiles for CPU/GPU environments.
+- Add structured logging and metrics export for observability.
+
+## Interview-Friendly Explanation
+
+This project is a backend-oriented computer vision system, not just a model demo. The main design decision is separating detection from event semantics. YOLO answers "what objects are in the frame," tracking answers "which object is which over time," and the rule layer answers "does this behavior matter operationally?"
+
+The pipeline is intentionally modular:
+
+- The detector and tracker can be swapped behind small interfaces.
+- Rules are loaded from configuration and evaluated against the same track list.
+- Alert policy is isolated so cooldown behavior is testable.
+- Persistence is behind a repository boundary and can target SQLite or PostgreSQL.
+- FastAPI exposes read models for dashboards without coupling clients to the video runner.
+
+In an interview, the system can be described as an event-driven architecture for video analytics:
+
+1. Ingest frames from one or more camera sources.
+2. Convert frames into detections and stable tracks.
+3. Evaluate tracks against business rules.
+4. Filter noisy repeats with alert policy.
+5. Store event metadata and snapshots.
+6. Expose APIs for monitoring, querying, and dashboard consumption.
+
+The strongest engineering points are the clear boundaries between pipeline stages, config-driven rule behavior, database portability, API testability, and operational features such as camera health and event statistics.
