@@ -1,8 +1,11 @@
+from datetime import datetime
 from typing import Annotated, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.schemas.events import EventResponse
+from app.schemas.events import EventResponse, EventStatsResponse
+from app.schemas.health import CameraHealthResponse
+from app.services.camera_health import camera_health_registry
 
 router = APIRouter()
 
@@ -16,6 +19,15 @@ class EventReader(Protocol):
         ...
 
     def get(self, event_id: int) -> object | None:
+        ...
+
+    def stats(
+        self,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        camera_id: str | None = None,
+        rule_name: str | None = None,
+    ) -> dict[str, object]:
         ...
 
 
@@ -43,6 +55,37 @@ def get_event_repository() -> EventReader:
     from app.repositories.event_repository import EventRepository
 
     return EventRepository()
+
+
+@router.get(
+    "/events/stats",
+    response_model=EventStatsResponse,
+    tags=["events"],
+)
+async def event_stats(
+    repository: Annotated[EventReader, Depends(get_event_repository)],
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+    camera_id: str | None = None,
+    rule_name: str | None = None,
+) -> dict[str, object]:
+    """Return aggregate event statistics for dashboard views."""
+    return repository.stats(
+        start_at=start_at,
+        end_at=end_at,
+        camera_id=camera_id,
+        rule_name=rule_name,
+    )
+
+
+@router.get(
+    "/cameras/health",
+    response_model=list[CameraHealthResponse],
+    tags=["cameras"],
+)
+async def camera_health() -> list[object]:
+    """Return runtime-only per-camera health state."""
+    return camera_health_registry.list_health()
 
 
 @router.get(

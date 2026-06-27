@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.pipeline.vision_event_pipeline import VisionEventPipeline
 from app.core.config import load_settings
 from app.database.urls import database_backend, redact_database_url
+from app.services.camera_health import camera_health_registry
 from storage.event_repository import EventRepository as SqliteEventRepository
 
 DEFAULT_SNAPSHOT_DIR = Path("data/snapshots")
@@ -126,6 +127,11 @@ def _process_camera(
 ) -> int:
     video_path = camera.source
     if not video_path.is_file():
+        camera_health_registry.mark_error(
+            camera.id,
+            f"Video file not found: {video_path}",
+            str(video_path),
+        )
         print(
             f"Video file not found for camera {camera.id}: {video_path}",
             file=sys.stderr,
@@ -134,6 +140,11 @@ def _process_camera(
 
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
+        camera_health_registry.mark_error(
+            camera.id,
+            f"Unable to open video file: {video_path}",
+            str(video_path),
+        )
         print(
             f"Unable to open video file for camera {camera.id}: {video_path}",
             file=sys.stderr,
@@ -143,6 +154,7 @@ def _process_camera(
     pipeline = VisionEventPipeline(
         event_repository=_NoOpEventRepository(),
         camera_id=camera.id,
+        camera_source=str(camera.source),
     )
     snapshot_dir = args.snapshot_dir
     fps = capture.get(cv2.CAP_PROP_FPS) or 0.0

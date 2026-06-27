@@ -114,13 +114,29 @@ def test_stats_returns_total_and_counts_by_type(tmp_path, monkeypatch) -> None:
     response = client.get("/stats")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "total_event_count": 3,
-        "event_count_by_type": {
-            "danger_zone": 2,
-            "line_crossing": 1,
-        },
+    payload = response.json()
+    assert payload["total_event_count"] == 3
+    assert payload["event_count_by_rule_name"] == {
+        "danger_zone": 2,
+        "line_crossing": 1,
     }
+    assert payload["event_count_by_camera_id"] == {"camera-1": 3}
+    assert payload["latest_event_timestamp"] is not None
+
+
+def test_event_stats_supports_camera_and_rule_filters(tmp_path, monkeypatch) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    repository = EventRepository(db_path)
+    repository.save(make_event(event_type="danger_zone", track_id=1, camera_id="gate_01"))
+    repository.save(make_event(event_type="danger_zone", track_id=2, camera_id="gate_02"))
+    repository.save(make_event(event_type="loitering", track_id=3, camera_id="gate_01"))
+
+    response = client.get("/events/stats?camera_id=gate_01&rule_name=loitering")
+
+    assert response.status_code == 200
+    assert response.json()["total_event_count"] == 1
+    assert response.json()["event_count_by_rule_name"] == {"loitering": 1}
+    assert response.json()["event_count_by_camera_id"] == {"gate_01": 1}
 
 
 def test_dashboard_route_shows_saved_event_summary(tmp_path, monkeypatch) -> None:
@@ -136,8 +152,11 @@ def test_dashboard_route_shows_saved_event_summary(tmp_path, monkeypatch) -> Non
     assert "Vision Events Dashboard" in response.text
     assert "Service status" in response.text
     assert "OK" in response.text
-    assert "Total event count" in response.text
+    assert "Today total events" in response.text
     assert "<p class=\"value\">2</p>" in response.text
+    assert "Events By Rule" in response.text
+    assert "Events By Camera" in response.text
+    assert "Camera Health" in response.text
     assert "danger_zone" in response.text
     assert "line_crossing" in response.text
     assert "camera-1" in response.text

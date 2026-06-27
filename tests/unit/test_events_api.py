@@ -24,6 +24,9 @@ class FakeEventRepository:
     def __init__(self, events: list[FakeEvent]) -> None:
         self.events = events
         self.list_recent_calls: list[tuple[int, str | None]] = []
+        self.stats_calls: list[
+            tuple[datetime | None, datetime | None, str | None, str | None]
+        ] = []
 
     def list_recent(
         self,
@@ -38,6 +41,29 @@ class FakeEventRepository:
 
     def get(self, event_id: int) -> FakeEvent | None:
         return next((event for event in self.events if event.id == event_id), None)
+
+    def stats(
+        self,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        camera_id: str | None = None,
+        rule_name: str | None = None,
+    ) -> dict[str, object]:
+        self.stats_calls.append((start_at, end_at, camera_id, rule_name))
+        return {
+            "total_event_count": 2,
+            "event_count_by_rule_name": {"danger_zone": 2},
+            "event_count_by_camera_id": {"gate_01": 2},
+            "hourly_event_counts": {"2026-06-22T10:00:00+00:00": 2},
+            "latest_event_timestamp": datetime(
+                2026,
+                6,
+                22,
+                10,
+                30,
+                tzinfo=timezone.utc,
+            ),
+        }
 
 
 def make_event(event_id: int = 1, created_at: datetime | None = None) -> FakeEvent:
@@ -121,6 +147,34 @@ def test_latest_events_passes_camera_id_to_repository() -> None:
     app.dependency_overrides.clear()
     assert response.status_code == 200
     assert repository.list_recent_calls == [(5, "gate_01")]
+
+
+def test_event_stats_passes_filters_to_repository() -> None:
+    repository = FakeEventRepository([make_event(event_id=1)])
+    client = make_client(repository)
+
+    response = client.get(
+        "/events/stats?"
+        "camera_id=gate_01&"
+        "rule_name=danger_zone&"
+        "start_at=2026-06-22T00:00:00Z&"
+        "end_at=2026-06-23T00:00:00Z"
+    )
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert response.json() == {
+        "total_event_count": 2,
+        "event_count_by_rule_name": {"danger_zone": 2},
+        "event_count_by_camera_id": {"gate_01": 2},
+        "hourly_event_counts": {"2026-06-22T10:00:00+00:00": 2},
+        "latest_event_timestamp": "2026-06-22T10:30:00Z",
+    }
+    start_at, end_at, camera_id, rule_name = repository.stats_calls[0]
+    assert start_at == datetime(2026, 6, 22, tzinfo=timezone.utc)
+    assert end_at == datetime(2026, 6, 23, tzinfo=timezone.utc)
+    assert camera_id == "gate_01"
+    assert rule_name == "danger_zone"
 
 
 def test_get_event_returns_single_event() -> None:

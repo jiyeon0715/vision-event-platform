@@ -7,29 +7,10 @@ The goal of this project is to transform object detection results into an event-
 ## Architecture
 
 ```text
-Camera definitions
-    ├─ gate_01 source
-    │   ↓
-    │   VisionEventPipeline context
-    │   ├─ YOLO Detector
-    │   ├─ ByteTrack Tracker
-    │   ├─ Rule Engine
-    │   └─ AlertPolicy
-    │       ↓
-    │       gate_01 events + snapshots
-    └─ gate_02 source
-        ↓
-        VisionEventPipeline context
-        ├─ YOLO Detector
-        ├─ ByteTrack Tracker
-        ├─ Rule Engine
-        └─ AlertPolicy
-            ↓
-            gate_02 events + snapshots
-                ↓
-          SQLite/PostgreSQL
-                ↓
-          FastAPI API + Dashboard
+Multi Camera -> YOLO -> Rule Engine -> Alert Policy -> Snapshot -> DB -> API -> Dashboard
+      |
+      v
+Camera Health / Statistics
 ```
 
 The event evaluation layer is plugin-based. Each configured camera gets its own
@@ -51,19 +32,28 @@ flowchart LR
     G --> I["gate_02 AlertPolicy"]
     H --> J["Events with camera_id"]
     I --> J
+    B --> N["Camera Health"]
+    C --> N
+    J --> O["Statistics"]
     J --> K["Camera snapshot folders"]
     J --> L["SQLite/PostgreSQL"]
     L --> M["API and Dashboard camera filters"]
+    N --> M
+    O --> M
 ```
 
 ```mermaid
 flowchart LR
-    A["Frame"] --> B["Detection"]
-    B --> C["Tracking"]
-    C --> D["Rules"]
-    D --> E["AlertPolicy"]
-    E --> F["Snapshot"]
-    F --> G["DB/API/Dashboard"]
+    A["Multi Camera"] --> B["YOLO"]
+    B --> C["Rule Engine"]
+    C --> D["Alert Policy"]
+    D --> E["Snapshot"]
+    E --> F["DB"]
+    F --> G["API"]
+    G --> H["Dashboard"]
+    A --> I["Camera Health / Statistics"]
+    D --> I
+    I --> G
 ```
 
 ## Features
@@ -80,6 +70,9 @@ flowchart LR
 - Read-only saved event API
 - Event frame snapshot storage and dashboard thumbnails
 - Multi-camera configuration and camera-filtered event queries
+- Event statistics API with date, camera, and rule filters
+- Runtime camera health monitoring API
+- Dashboard statistics and camera health sections
 - Plugin-based rule engine
 - Danger zone, loitering, and person-count rules
 
@@ -349,14 +342,27 @@ http://localhost:8000/
 http://localhost:8000/dashboard
 ```
 
-The dashboard is server-rendered by FastAPI. It shows service status, total
-event count, event count by type, and the latest saved events from the same
-SQLite database used by the API. Latest events include `camera_id` and a
-Snapshot column with a thumbnail when `snapshot_path` is present. Add
-`?camera_id=gate_01` to show latest events for one camera. Clicking a thumbnail
-opens the full-size JPEG from `GET /snapshots/{camera_id}/{filename}`. Missing
-snapshot files return a 404 from the snapshot endpoint and do not prevent the
-dashboard from rendering.
+The dashboard is server-rendered by FastAPI. It shows service status, today's
+event count, events by rule, events by camera, recent event time, runtime camera
+health, and the latest saved events from the same SQLite database used by the
+API. Latest events include `camera_id` and a Snapshot column with a thumbnail
+when `snapshot_path` is present. Add `?camera_id=gate_01` to scope the dashboard
+to one camera. Clicking a thumbnail opens the full-size JPEG from
+`GET /snapshots/{camera_id}/{filename}`. Missing snapshot files return a 404
+from the snapshot endpoint and do not prevent the dashboard from rendering.
+
+Operational dashboards need statistics and camera health because saved events
+alone are not enough to run a monitoring system. Operators need to see whether
+alerts are spiking by rule, whether one camera is generating unusual volume, and
+whether a quiet camera is genuinely safe or simply offline. The health endpoint
+tracks current process memory only: `last_frame_at`, `last_event_at`, frame and
+event counters, status, source, and last error reset when the API or runner
+process restarts. Historical health storage can be added later if uptime
+reporting becomes a requirement.
+
+The dashboard is intentionally REST-based for now. Real-time push is not
+implemented; if needed later, Server-Sent Events can be added without changing
+the read-heavy statistics and health endpoints.
 
 Example API requests:
 
@@ -369,6 +375,11 @@ curl "http://localhost:8000/events/latest?limit=5"
 curl "http://localhost:8000/events/latest?camera_id=gate_01&limit=5"
 curl http://localhost:8000/snapshots/gate_01/example.jpg
 curl http://localhost:8000/stats
+curl http://localhost:8000/events/stats
+curl "http://localhost:8000/events/stats?camera_id=gate_01"
+curl "http://localhost:8000/events/stats?rule_name=danger_zone"
+curl "http://localhost:8000/events/stats?start_at=2026-06-22T00:00:00Z&end_at=2026-06-23T00:00:00Z"
+curl http://localhost:8000/cameras/health
 ```
 
 ## Tests

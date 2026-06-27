@@ -146,3 +146,52 @@ def test_get_returns_event_by_id() -> None:
     assert found is not None
     assert found.id == saved.id
     assert found.track_id == 99
+
+
+def test_stats_aggregates_events_and_filters() -> None:
+    session = make_session()
+    repository = EventRepository(session=session)
+    session.add_all(
+        [
+            EventModel(
+                event_type="danger_zone",
+                camera_id="gate_01",
+                track_id=1,
+                timestamp=1.0,
+                message="First event",
+                created_at=datetime(2026, 6, 22, 10, 15, tzinfo=timezone.utc),
+            ),
+            EventModel(
+                event_type="danger_zone",
+                camera_id="gate_01",
+                track_id=2,
+                timestamp=2.0,
+                message="Second event",
+                created_at=datetime(2026, 6, 22, 10, 45, tzinfo=timezone.utc),
+            ),
+            EventModel(
+                event_type="loitering",
+                camera_id="gate_02",
+                track_id=3,
+                timestamp=3.0,
+                message="Third event",
+                created_at=datetime(2026, 6, 22, 11, 5, tzinfo=timezone.utc),
+            ),
+        ]
+    )
+    session.commit()
+
+    stats = repository.stats(
+        start_at=datetime(2026, 6, 22, 10, 0, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 22, 10, 59, tzinfo=timezone.utc),
+        camera_id="gate_01",
+        rule_name="danger_zone",
+    )
+
+    assert stats == {
+        "total_event_count": 2,
+        "event_count_by_rule_name": {"danger_zone": 2},
+        "event_count_by_camera_id": {"gate_01": 2},
+        "hourly_event_counts": {"2026-06-22T10:00:00": 2},
+        "latest_event_timestamp": datetime(2026, 6, 22, 10, 45),
+    }

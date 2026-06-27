@@ -102,6 +102,47 @@ def test_snapshot_path_is_persisted(tmp_path) -> None:
     )
 
 
+def test_stats_aggregates_and_filters_events(tmp_path) -> None:
+    repository = EventRepository(tmp_path / "events.db")
+    repository.save(make_event(track_id=1, camera_id="gate_01"))
+    repository.save(make_event(track_id=2, camera_id="gate_02"))
+    repository.save(
+        {
+            **make_event(track_id=3, camera_id="gate_01"),
+            "event_type": "loitering",
+        }
+    )
+
+    with sqlite3.connect(repository.db_path) as connection:
+        connection.execute(
+            "UPDATE events SET created_at = ? WHERE track_id = ?",
+            ("2026-06-22T10:15:00+00:00", 1),
+        )
+        connection.execute(
+            "UPDATE events SET created_at = ? WHERE track_id = ?",
+            ("2026-06-22T11:15:00+00:00", 2),
+        )
+        connection.execute(
+            "UPDATE events SET created_at = ? WHERE track_id = ?",
+            ("2026-06-22T10:45:00+00:00", 3),
+        )
+        connection.commit()
+
+    stats = repository.stats(
+        start_at="2026-06-22T10:00:00+00:00",
+        end_at="2026-06-22T10:59:59+00:00",
+        camera_id="gate_01",
+    )
+
+    assert stats == {
+        "total_event_count": 2,
+        "event_count_by_rule_name": {"danger_zone": 1, "loitering": 1},
+        "event_count_by_camera_id": {"gate_01": 2},
+        "hourly_event_counts": {"2026-06-22T10:00:00+00:00": 2},
+        "latest_event_timestamp": "2026-06-22T10:45:00+00:00",
+    }
+
+
 def test_existing_database_adds_snapshot_path_column(tmp_path) -> None:
     db_path = tmp_path / "events.db"
     with sqlite3.connect(db_path) as connection:

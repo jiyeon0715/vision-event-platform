@@ -38,3 +38,11 @@ else:
 
         class Config:
             orm_mode = True
+
+
+class EventStatsResponse(BaseModel):
+    total_event_count: int
+    event_count_by_rule_name: dict[str, int]
+    event_count_by_camera_id: dict[str, int]
+    hourly_event_counts: dict[str, int]
+    latest_event_timestamp: datetime | None

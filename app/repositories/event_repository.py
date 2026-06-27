@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from typing import Protocol
 
 from sqlalchemy import select
@@ -66,6 +68,40 @@ class EventRepository:
         with self._session_factory() as session:
             return session.get(EventModel, event_id)
 
+    def stats(
+        self,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        camera_id: str | None = None,
+        rule_name: str | None = None,
+    ) -> dict[str, object]:
+        statement = select(EventModel)
+        if start_at is not None:
+            statement = statement.where(EventModel.created_at >= start_at)
+        if end_at is not None:
+            statement = statement.where(EventModel.created_at <= end_at)
+        if camera_id is not None:
+            statement = statement.where(EventModel.camera_id == camera_id)
+        if rule_name is not None:
+            statement = statement.where(EventModel.event_type == rule_name)
+
+        events = self._list_for_statement(statement)
+        rule_counts = Counter(event.event_type or "unknown" for event in events)
+        camera_counts = Counter(event.camera_id or "unknown" for event in events)
+        hourly_counts = Counter(_hour_bucket(event.created_at) for event in events)
+        latest_event_timestamp = max(
+            (event.created_at for event in events),
+            default=None,
+        )
+
+        return {
+            "total_event_count": len(events),
+            "event_count_by_rule_name": dict(sorted(rule_counts.items())),
+            "event_count_by_camera_id": dict(sorted(camera_counts.items())),
+            "hourly_event_counts": dict(sorted(hourly_counts.items())),
+            "latest_event_timestamp": latest_event_timestamp,
+        }
+
     def save_many(self, events: Iterable[EventRecord]) -> list[EventModel]:
         event_list = list(events)
         if not event_list:
@@ -98,8 +134,22 @@ class EventRepository:
                 session.refresh(model)
             return models
 
+    def _list_for_statement(self, statement: object) -> list[EventModel]:
+        if self._session is not None:
+            return list(self._session.scalars(statement).all())
+
+        if self._session_factory is None:
+            raise RuntimeError("EventRepository requires a session or session factory")
+
+        with self._session_factory() as session:
+            return list(session.scalars(statement).all())
+
 
 def _event_field(event: EventRecord, field_name: str, default: object = None) -> object:
     if isinstance(event, Mapping):
         return event.get(field_name, default)
     return getattr(event, field_name, default)
+
+
+def _hour_bucket(value: datetime) -> str:
+    return value.replace(minute=0, second=0, microsecond=0).isoformat()

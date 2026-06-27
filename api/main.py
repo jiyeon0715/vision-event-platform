@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, time, timezone
 from html import escape
 from pathlib import Path
 from typing import Annotated
@@ -10,6 +11,7 @@ from urllib.parse import quote
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.responses import FileResponse, HTMLResponse
 
+from app.services.camera_health import camera_health_registry
 from storage.event_repository import EventRepository
 
 DEFAULT_DB_PATH = Path("data/events.db")
@@ -40,7 +42,9 @@ def dashboard(
     camera_id: str | None = None,
 ) -> HTMLResponse:
     service_status = health(db_path)["status"].upper()
-    event_stats = stats(repository)
+    event_stats = repository.stats(camera_id=camera_id)
+    today_stats = repository.stats(start_at=_today_start_utc(), camera_id=camera_id)
+    camera_health_rows = cameras_health()
     events = latest_events(repository, limit=10, camera_id=camera_id)
 
     return HTMLResponse(
@@ -48,8 +52,11 @@ def dashboard(
             service_status=service_status,
             db_path=db_path,
             camera_id=camera_id,
-            total_event_count=event_stats["total_event_count"],
-            event_count_by_type=event_stats["event_count_by_type"],
+            today_event_count=today_stats["total_event_count"],
+            event_count_by_rule_name=event_stats["event_count_by_rule_name"],
+            event_count_by_camera_id=event_stats["event_count_by_camera_id"],
+            latest_event_timestamp=event_stats["latest_event_timestamp"],
+            camera_health_rows=camera_health_rows,
             latest_event_rows=events,
         )
     )
@@ -91,13 +98,37 @@ def latest_events(
 
 
 @app.get("/stats")
-def stats(
+@app.get("/events/stats")
+def event_stats_summary(
     repository: Annotated[EventRepository, Depends(get_event_repository)],
+    start_at: str | None = None,
+    end_at: str | None = None,
+    camera_id: str | None = None,
+    rule_name: str | None = None,
 ) -> dict:
-    return {
-        "total_event_count": repository.count_events(),
-        "event_count_by_type": repository.count_events_by_type(),
-    }
+    return repository.stats(
+        start_at=start_at,
+        end_at=end_at,
+        camera_id=camera_id,
+        rule_name=rule_name,
+    )
+
+
+@app.get("/cameras/health")
+def cameras_health() -> list[dict]:
+    return [
+        {
+            "camera_id": health.camera_id,
+            "source": health.source,
+            "status": health.status,
+            "last_frame_at": _format_optional_datetime(health.last_frame_at),
+            "last_event_at": _format_optional_datetime(health.last_event_at),
+            "processed_frame_count": health.processed_frame_count,
+            "emitted_event_count": health.emitted_event_count,
+            "last_error": health.last_error,
+        }
+        for health in camera_health_registry.list_health()
+    ]
 
 
 @app.get("/snapshots/{snapshot_path:path}")
@@ -146,11 +177,16 @@ def _render_dashboard(
     service_status: str,
     db_path: Path,
     camera_id: str | None,
-    total_event_count: int,
-    event_count_by_type: dict[str, int],
+    today_event_count: int,
+    event_count_by_rule_name: dict[str, int],
+    event_count_by_camera_id: dict[str, int],
+    latest_event_timestamp: str | None,
+    camera_health_rows: list[dict],
     latest_event_rows: list[dict],
 ) -> str:
-    type_rows = _render_event_type_rows(event_count_by_type)
+    rule_rows = _render_count_rows(event_count_by_rule_name, "rule_name")
+    camera_rows = _render_count_rows(event_count_by_camera_id, "camera_id")
+    health_rows = _render_camera_health_rows(camera_health_rows)
     event_rows = _render_latest_event_rows(latest_event_rows)
 
     return f"""<!doctype html>
@@ -351,22 +387,36 @@ def _render_dashboard(
         <p class="value status">{_html(service_status)}</p>
       </div>
       <div class="card">
-        <p class="label">Total event count</p>
-        <p class="value">{total_event_count}</p>
+        <p class="label">Today total events</p>
+        <p class="value">{today_event_count}</p>
       </div>
       <div class="card">
-        <p class="label">SQLite database</p>
-        <p class="db-path">{_html(str(db_path))}</p>
+        <p class="label">Recent event time</p>
+        <p class="db-path">{_html(latest_event_timestamp or "No events yet")}</p>
       </div>
       <div class="card">
         <p class="label">Camera filter</p>
         <p class="db-path">{_html(camera_id or "all cameras")}</p>
       </div>
+      <div class="card">
+        <p class="label">SQLite database</p>
+        <p class="db-path">{_html(str(db_path))}</p>
+      </div>
     </section>
 
     <section class="section">
-      <h2>Event Count By Type</h2>
-      {type_rows}
+      <h2>Events By Rule</h2>
+      {rule_rows}
+    </section>
+
+    <section class="section">
+      <h2>Events By Camera</h2>
+      {camera_rows}
+    </section>
+
+    <section class="section">
+      <h2>Camera Health</h2>
+      {health_rows}
     </section>
 
     <section class="section">
@@ -379,19 +429,55 @@ def _render_dashboard(
 </html>"""
 
 
-def _render_event_type_rows(event_count_by_type: dict[str, int]) -> str:
-    if not event_count_by_type:
+def _render_count_rows(counts: dict[str, int], label: str) -> str:
+    if not counts:
         return '<p class="empty">No saved events yet.</p>'
 
     rows = "\n".join(
-        f"<tr><td>{_html(event_type)}</td><td>{count}</td></tr>"
-        for event_type, count in event_count_by_type.items()
+        f"<tr><td>{_html(name)}</td><td>{count}</td></tr>"
+        for name, count in counts.items()
     )
     return f"""<table>
   <thead>
     <tr>
-      <th>event_type</th>
+      <th>{_html(label)}</th>
       <th>count</th>
+    </tr>
+  </thead>
+  <tbody>
+    {rows}
+  </tbody>
+</table>"""
+
+
+def _render_camera_health_rows(camera_health_rows: list[dict]) -> str:
+    if not camera_health_rows:
+        return '<p class="empty">No runtime camera health reported yet.</p>'
+
+    rows = "\n".join(
+        f"""<tr>
+      <td>{_html(row["camera_id"])}</td>
+      <td>{_html(row.get("source") or "")}</td>
+      <td>{_html(row["status"])}</td>
+      <td>{_html(row.get("last_frame_at") or "")}</td>
+      <td>{_html(row.get("last_event_at") or "")}</td>
+      <td>{row["processed_frame_count"]}</td>
+      <td>{row["emitted_event_count"]}</td>
+      <td>{_html(row.get("last_error") or "")}</td>
+    </tr>"""
+        for row in camera_health_rows
+    )
+    return f"""<table>
+  <thead>
+    <tr>
+      <th>camera_id</th>
+      <th>source</th>
+      <th>status</th>
+      <th>last_frame_at</th>
+      <th>last_event_at</th>
+      <th>frames</th>
+      <th>events</th>
+      <th>last_error</th>
     </tr>
   </thead>
   <tbody>
@@ -465,6 +551,20 @@ def _render_snapshot_cell(snapshot_path: object) -> str:
 
 def _html(value: object) -> str:
     return escape(str(value))
+
+
+def _today_start_utc() -> str:
+    return datetime.combine(
+        datetime.now(timezone.utc).date(),
+        time.min,
+        tzinfo=timezone.utc,
+    ).isoformat()
+
+
+def _format_optional_datetime(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
 
 
 def _snapshot_url_path(snapshot_path: Path) -> str:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -147,6 +148,55 @@ class EventRepository:
             for row in rows
         }
 
+    def stats(
+        self,
+        start_at: str | None = None,
+        end_at: str | None = None,
+        camera_id: str | None = None,
+        rule_name: str | None = None,
+    ) -> dict:
+        query = """
+            SELECT event_type, camera_id, created_at
+            FROM events
+        """
+        clauses = []
+        params: list[str] = []
+
+        if start_at is not None:
+            clauses.append("created_at >= ?")
+            params.append(start_at)
+        if end_at is not None:
+            clauses.append("created_at <= ?")
+            params.append(end_at)
+        if camera_id is not None:
+            clauses.append("camera_id = ?")
+            params.append(camera_id)
+        if rule_name is not None:
+            clauses.append("event_type = ?")
+            params.append(rule_name)
+
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(params)).fetchall()
+
+        rule_counts = Counter(str(row["event_type"] or "unknown") for row in rows)
+        camera_counts = Counter(str(row["camera_id"] or "unknown") for row in rows)
+        hourly_counts = Counter(_hour_bucket(str(row["created_at"])) for row in rows)
+        latest_event_timestamp = max(
+            (str(row["created_at"]) for row in rows),
+            default=None,
+        )
+
+        return {
+            "total_event_count": len(rows),
+            "event_count_by_rule_name": dict(sorted(rule_counts.items())),
+            "event_count_by_camera_id": dict(sorted(camera_counts.items())),
+            "hourly_event_counts": dict(sorted(hourly_counts.items())),
+            "latest_event_timestamp": latest_event_timestamp,
+        }
+
     def _create_table(self) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -177,3 +227,12 @@ class EventRepository:
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         return connection
+
+
+def _hour_bucket(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value[:13]
+
+    return parsed.replace(minute=0, second=0, microsecond=0).isoformat()
