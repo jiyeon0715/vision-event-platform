@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.routes import get_event_repository
@@ -83,6 +84,11 @@ def make_client(repository: FakeEventRepository) -> TestClient:
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def clear_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("API_KEY", raising=False)
+
+
 def test_list_events_returns_recent_events() -> None:
     repository = FakeEventRepository([make_event(event_id=1), make_event(event_id=2)])
     client = make_client(repository)
@@ -112,6 +118,57 @@ def test_list_events_returns_recent_events() -> None:
         },
     ]
     assert repository.list_recent_calls == [(100, None)]
+
+
+def test_protected_route_allows_local_access_without_api_key() -> None:
+    repository = FakeEventRepository([make_event(event_id=1)])
+    client = make_client(repository)
+
+    response = client.get("/events")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+
+
+def test_protected_route_requires_api_key_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("API_KEY", "secret-key")
+    repository = FakeEventRepository([make_event(event_id=1)])
+    client = make_client(repository)
+
+    response = client.get("/events")
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid or missing API key"}
+
+
+def test_protected_route_accepts_valid_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("API_KEY", "secret-key")
+    repository = FakeEventRepository([make_event(event_id=1)])
+    client = make_client(repository)
+
+    response = client.get("/events", headers={"X-API-Key": "secret-key"})
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert response.json()[0]["id"] == 1
+
+
+def test_protected_route_rejects_invalid_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("API_KEY", "secret-key")
+    repository = FakeEventRepository([make_event(event_id=1)])
+    client = make_client(repository)
+
+    response = client.get("/events", headers={"X-API-Key": "wrong-key"})
+
+    app.dependency_overrides.clear()
+    assert response.status_code == 401
 
 
 def test_list_events_passes_limit_to_repository() -> None:

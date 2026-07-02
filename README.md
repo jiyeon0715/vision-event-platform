@@ -225,6 +225,29 @@ http://localhost:8000/dashboard
 
 The dashboard renders service status, event counts by rule and camera, current camera health, recent saved events, and snapshot thumbnails when `snapshot_path` is present.
 
+## Security Configuration
+
+Local development is open by default for portfolio viewing and quick testing. If `API_KEY` is not set, protected API routes do not require a key, and `/docs` remains available.
+
+For a production-like run, set `API_KEY` and pass it with the `X-API-Key` header when calling protected APIs:
+
+```bash
+export API_KEY="change-me"
+curl -H "X-API-Key: change-me" "http://localhost:8000/events/latest?limit=5"
+```
+
+The dashboard route `/` stays accessible for local portfolio demos. Protected routes include `/events`, `/events/latest`, `/events/stats`, `/cameras/health`, and `/health/db`.
+
+Swagger docs are enabled in local/dev mode. In production, docs can be disabled:
+
+```bash
+export APP_ENV=production
+export ENABLE_DOCS=false
+uvicorn main:app
+```
+
+Snapshot files are served only from `SNAPSHOT_DIR` and invalid or traversal paths return 404.
+
 ## API Examples
 
 ### Health
@@ -243,6 +266,12 @@ curl http://localhost:8000/health
 curl http://localhost:8000/health/db
 ```
 
+With `API_KEY` set:
+
+```bash
+curl -H "X-API-Key: change-me" http://localhost:8000/health/db
+```
+
 ```json
 {
   "status": "ok",
@@ -254,6 +283,13 @@ curl http://localhost:8000/health/db
 
 ```bash
 curl "http://localhost:8000/events/latest?limit=5&camera_id=gate_01"
+```
+
+With `API_KEY` set:
+
+```bash
+curl -H "X-API-Key: change-me" \
+  "http://localhost:8000/events/latest?limit=5&camera_id=gate_01"
 ```
 
 ```json
@@ -283,6 +319,13 @@ curl http://localhost:8000/events/1
 curl "http://localhost:8000/events/stats?camera_id=gate_01&rule_name=danger_zone"
 ```
 
+With `API_KEY` set:
+
+```bash
+curl -H "X-API-Key: change-me" \
+  "http://localhost:8000/events/stats?camera_id=gate_01&rule_name=danger_zone"
+```
+
 ```json
 {
   "total_event_count": 12,
@@ -304,6 +347,12 @@ curl "http://localhost:8000/events/stats?camera_id=gate_01&rule_name=danger_zone
 
 ```bash
 curl http://localhost:8000/cameras/health
+```
+
+With `API_KEY` set:
+
+```bash
+curl -H "X-API-Key: change-me" http://localhost:8000/cameras/health
 ```
 
 ```json
@@ -348,6 +397,7 @@ The test suite is organized around unit coverage for the behavior that matters m
 - Runtime camera health state.
 - Configuration loading.
 - Snapshot path creation in the video runner.
+- API-key protection, docs visibility, security headers, and snapshot traversal blocking.
 - Database health checks.
 
 Run tests with:
@@ -363,12 +413,10 @@ pip install -r requirements-ci.txt
 pytest
 ```
 
-Documentation-only note: this README polish did not require running application code or the test suite.
-
 ## Future Improvements
 
 - Add a small dashboard frontend that renders event lists, statistics, camera health, and snapshot thumbnails.
-- Serve snapshot files through authenticated API endpoints instead of exposing filesystem paths directly.
+- Add optional authentication for snapshot evidence endpoints when serving non-local deployments.
 - Add async or background worker execution for long-running camera streams.
 - Support RTSP camera sources and reconnection/backoff policies.
 - Persist camera health history for operational trend analysis.

@@ -3,6 +3,7 @@ from typing import Annotated, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.core.security import require_api_key
 from app.schemas.events import EventResponse, EventStatsResponse
 from app.schemas.health import CameraHealthResponse
 from app.services.camera_health import camera_health_registry
@@ -37,7 +38,7 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/health/db", tags=["health"])
+@router.get("/health/db", tags=["health"], dependencies=[Depends(require_api_key)])
 async def database_health_check() -> dict[str, str]:
     """Return database connectivity status."""
     from app.database.health import check_database_health
@@ -61,6 +62,7 @@ def get_event_repository() -> EventReader:
     "/events/stats",
     response_model=EventStatsResponse,
     tags=["events"],
+    dependencies=[Depends(require_api_key)],
 )
 async def event_stats(
     repository: Annotated[EventReader, Depends(get_event_repository)],
@@ -82,6 +84,7 @@ async def event_stats(
     "/cameras/health",
     response_model=list[CameraHealthResponse],
     tags=["cameras"],
+    dependencies=[Depends(require_api_key)],
 )
 async def camera_health() -> list[object]:
     """Return runtime-only per-camera health state."""
@@ -93,6 +96,7 @@ async def camera_health() -> list[object]:
     response_model=list[EventResponse],
     response_model_exclude_none=True,
     tags=["events"],
+    dependencies=[Depends(require_api_key)],
 )
 async def list_events(
     repository: Annotated[EventReader, Depends(get_event_repository)],
@@ -108,6 +112,7 @@ async def list_events(
     response_model=list[EventResponse],
     response_model_exclude_none=True,
     tags=["events"],
+    dependencies=[Depends(require_api_key)],
 )
 async def list_latest_events(
     repository: Annotated[EventReader, Depends(get_event_repository)],

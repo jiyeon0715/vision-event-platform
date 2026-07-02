@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from app.api.routes import router as api_router
 from app.core.config import get_settings
+from app.core.security import add_security_headers, docs_config
 from app.database.health import initialize_database
 from app.database.urls import database_backend, redact_database_url
 
@@ -27,5 +28,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title=settings.app.name, lifespan=lifespan)
+app = FastAPI(title=settings.app.name, lifespan=lifespan, **docs_config())
+add_security_headers(app)
 app.include_router(api_router)

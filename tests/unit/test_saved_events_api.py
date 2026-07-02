@@ -24,6 +24,7 @@ def make_event(
 def make_client(tmp_path, monkeypatch) -> tuple[TestClient, str]:
     db_path = tmp_path / "events.db"
     snapshot_dir = tmp_path / "snapshots"
+    monkeypatch.delenv("API_KEY", raising=False)
     monkeypatch.setenv("EVENT_DB_PATH", str(db_path))
     monkeypatch.setenv("SNAPSHOT_DIR", str(snapshot_dir))
     return TestClient(app), str(db_path)
@@ -215,6 +216,16 @@ def test_snapshot_endpoint_serves_file_and_missing_returns_404(
     assert response.content == b"jpeg bytes"
     assert response.headers["content-type"] == "image/jpeg"
     assert missing_response.status_code == 404
+
+
+def test_snapshot_endpoint_blocks_path_traversal(tmp_path, monkeypatch) -> None:
+    client, _ = make_client(tmp_path, monkeypatch)
+    outside_file = tmp_path / "outside.jpg"
+    outside_file.write_bytes(b"outside")
+
+    response = client.get("/snapshots/%2E%2E/outside.jpg")
+
+    assert response.status_code == 404
 
 
 def test_root_route_serves_dashboard(tmp_path, monkeypatch) -> None:

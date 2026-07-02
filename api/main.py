@@ -11,13 +11,15 @@ from urllib.parse import quote
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.responses import FileResponse, HTMLResponse
 
+from app.core.security import add_security_headers, docs_config, require_api_key
 from app.services.camera_health import camera_health_registry
 from storage.event_repository import EventRepository
 
 DEFAULT_DB_PATH = Path("data/events.db")
 DEFAULT_SNAPSHOT_DIR = Path("data/snapshots")
 
-app = FastAPI(title="Vision Events API")
+app = FastAPI(title="Vision Events API", **docs_config())
+add_security_headers(app)
 
 
 def get_db_path() -> Path:
@@ -70,7 +72,7 @@ def health(db_path: Annotated[Path, Depends(get_db_path)]) -> dict[str, str]:
     }
 
 
-@app.get("/events")
+@app.get("/events", dependencies=[Depends(require_api_key)])
 def list_events(
     repository: Annotated[EventRepository, Depends(get_event_repository)],
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
@@ -87,7 +89,7 @@ def list_events(
     return [_format_event(event) for event in events]
 
 
-@app.get("/events/latest")
+@app.get("/events/latest", dependencies=[Depends(require_api_key)])
 def latest_events(
     repository: Annotated[EventRepository, Depends(get_event_repository)],
     limit: Annotated[int, Query(ge=1, le=500)] = 10,
@@ -97,8 +99,8 @@ def latest_events(
     return [_format_event(event) for event in events]
 
 
-@app.get("/stats")
-@app.get("/events/stats")
+@app.get("/stats", dependencies=[Depends(require_api_key)])
+@app.get("/events/stats", dependencies=[Depends(require_api_key)])
 def event_stats_summary(
     repository: Annotated[EventRepository, Depends(get_event_repository)],
     start_at: str | None = None,
@@ -114,7 +116,7 @@ def event_stats_summary(
     )
 
 
-@app.get("/cameras/health")
+@app.get("/cameras/health", dependencies=[Depends(require_api_key)])
 def cameras_health() -> list[dict]:
     return [
         {
@@ -576,7 +578,14 @@ def _snapshot_url_path(snapshot_path: Path) -> str:
 
 
 def _resolve_snapshot_path(snapshot_dir: Path, snapshot_path: str) -> Path:
-    candidate = snapshot_dir.joinpath(*Path(snapshot_path).parts)
+    requested_path = Path(snapshot_path)
+    if requested_path.is_absolute() or ".." in requested_path.parts:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Snapshot not found",
+        )
+
+    candidate = snapshot_dir.joinpath(*requested_path.parts)
     resolved_dir = snapshot_dir.resolve()
     resolved_candidate = candidate.resolve()
     if resolved_candidate == resolved_dir or resolved_dir not in resolved_candidate.parents:
