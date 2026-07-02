@@ -3,7 +3,7 @@ app:
   environment: local
 
 database:
-  url: postgresql://vision@postgres:5432/vision_events
+  url: sqlite:///data/events.db
 
 yolo:
   model_path: models/yolo.pt

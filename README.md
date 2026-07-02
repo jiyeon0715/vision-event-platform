@@ -107,17 +107,17 @@ Start the FastAPI app:
 uvicorn main:app --reload
 ```
 
+Local development uses SQLite by default via `config/config.yaml`:
+
+```text
+sqlite:///data/events.db
+```
+
 Check service health:
 
 ```bash
 curl http://localhost:8000/health
 curl http://localhost:8000/health/db
-```
-
-Use SQLite locally by overriding the configured database URL:
-
-```bash
-DATABASE_URL=sqlite:///data/events.db uvicorn main:app --reload
 ```
 
 Run the pipeline against one local video:
@@ -154,16 +154,7 @@ cameras:
 
 ## Docker Run
 
-Build and run only the API image:
-
-```bash
-docker build -f docker/Dockerfile -t vision-event-platform .
-
-docker run --rm -p 8000:8000 \
-  -e DATABASE_URL=sqlite:///data/events.db \
-  -v "$PWD/data:/app/data" \
-  vision-event-platform
-```
+Docker deployment uses PostgreSQL. `docker-compose.yml` explicitly injects `DATABASE_URL` into the app container, which overrides the local SQLite setting from `config/config.yaml`.
 
 Run the full stack with PostgreSQL:
 
@@ -205,6 +196,19 @@ Verify persisted events:
 curl "http://localhost:8000/events/latest?limit=5"
 ```
 
+### API Image Only
+
+Build and run only the API image:
+
+```bash
+docker build -f docker/Dockerfile -t vision-event-platform .
+
+docker run --rm -p 8000:8000 \
+  -e DATABASE_URL=sqlite:///data/events.db \
+  -v "$PWD/data:/app/data" \
+  vision-event-platform
+```
+
 ## Demo Dashboard
 
 The primary API entry point is `main:app`. The repository also includes a lightweight saved-events dashboard in `api.main` for local portfolio demos that read from the runner's SQLite database:
@@ -242,7 +246,7 @@ curl http://localhost:8000/health/db
 ```json
 {
   "status": "ok",
-  "backend": "postgresql"
+  "backend": "sqlite"
 }
 ```
 
