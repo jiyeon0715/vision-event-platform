@@ -213,6 +213,20 @@ docker run --rm -p 8000:8000 \
 
 The primary API entry point is `main:app`. The repository also includes a lightweight saved-events dashboard in `api.main` for local portfolio demos that read from the runner's SQLite database:
 
+Seed local sample events and snapshots:
+
+```bash
+python scripts/seed_dashboard_data.py
+```
+
+The seed script inserts 36 sample events into `data/events.db` by default and writes thumbnail snapshots under `data/snapshots`. Use `--count 20` through `--count 50` to control the sample size, or `--reset` to replace existing rows:
+
+```bash
+python scripts/seed_dashboard_data.py --reset --count 40
+```
+
+Start the dashboard API:
+
 ```bash
 EVENT_DB_PATH=data/events.db SNAPSHOT_DIR=data/snapshots uvicorn api.main:app --reload
 ```
@@ -224,6 +238,8 @@ http://localhost:8000/dashboard
 ```
 
 The dashboard renders service status, event counts by rule and camera, current camera health, recent saved events, and snapshot thumbnails when `snapshot_path` is present.
+
+When no runtime camera pipeline is active, `api.main` returns sample camera health rows only in local/dev/test mode so the Dashboard can be inspected after seeding. Set `APP_ENV=production` for production-like runs; sample camera health fallback is disabled outside local environments.
 
 ## Security Configuration
 

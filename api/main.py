@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from api.dashboard_assets import render_dashboard_html
 from app.core.security import (
+    LOCAL_APP_ENVS,
     add_security_headers,
     docs_config,
     require_api_key,
@@ -62,6 +63,10 @@ def dashboard(
     event_stats = repository.stats(camera_id=camera_id)
     today_stats = repository.stats(start_at=_today_start_utc(), camera_id=camera_id)
     camera_health_rows = cameras_health()
+    if camera_id is not None:
+        camera_health_rows = [
+            row for row in camera_health_rows if row["camera_id"] == camera_id
+        ]
     events = latest_events(repository, limit=10, camera_id=camera_id)
 
     return HTMLResponse(
@@ -157,7 +162,7 @@ def event_stats_summary(
 
 @app.get("/cameras/health", dependencies=[Depends(require_api_key)])
 def cameras_health() -> list[dict]:
-    return [
+    rows = [
         {
             "camera_id": health.camera_id,
             "source": health.source,
@@ -170,6 +175,10 @@ def cameras_health() -> list[dict]:
         }
         for health in camera_health_registry.list_health()
     ]
+    if rows or not _is_local_app_env():
+        return rows
+
+    return _sample_camera_health_rows()
 
 
 @app.get("/snapshots/{snapshot_path:path}", dependencies=[Depends(require_api_key)])
@@ -374,6 +383,49 @@ def _format_optional_datetime(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.isoformat()
+
+
+def _is_local_app_env() -> bool:
+    app_env = os.environ.get("APP_ENV", "local").strip().lower()
+    return app_env in LOCAL_APP_ENVS
+
+
+def _sample_camera_health_rows() -> list[dict]:
+    now = datetime.now(timezone.utc)
+    last_frame_at = now.isoformat()
+    last_event_at = now.replace(microsecond=0).isoformat()
+    return [
+        {
+            "camera_id": "gate_01",
+            "source": "sample://front-gate",
+            "status": "online",
+            "last_frame_at": last_frame_at,
+            "last_event_at": last_event_at,
+            "processed_frame_count": 18420,
+            "emitted_event_count": 18,
+            "last_error": None,
+        },
+        {
+            "camera_id": "lobby_02",
+            "source": "sample://main-lobby",
+            "status": "online",
+            "last_frame_at": last_frame_at,
+            "last_event_at": last_event_at,
+            "processed_frame_count": 17680,
+            "emitted_event_count": 11,
+            "last_error": None,
+        },
+        {
+            "camera_id": "dock_03",
+            "source": "sample://loading-dock",
+            "status": "degraded",
+            "last_frame_at": last_frame_at,
+            "last_event_at": last_event_at,
+            "processed_frame_count": 9310,
+            "emitted_event_count": 7,
+            "last_error": "Sample intermittent frame delay",
+        },
+    ]
 
 
 def _snapshot_url_path(snapshot_path: Path) -> str:

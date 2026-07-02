@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
+from app.services.camera_health import camera_health_registry
 from api.main import app
+from scripts.seed_dashboard_data import main as seed_dashboard_data
 from storage.event_repository import EventRepository
 
 
@@ -216,6 +220,81 @@ def test_dashboard_renders_snapshot_thumbnail(tmp_path, monkeypatch) -> None:
     assert 'href="/snapshots/gate_01/event-1.jpg"' in response.text
     assert 'src="/snapshots/gate_01/event-1.jpg"' in response.text
     assert 'class="snapshot-thumb"' in response.text
+
+
+def test_cameras_health_returns_local_sample_when_runtime_state_is_empty(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    camera_health_registry.reset()
+    client, _ = make_client(tmp_path, monkeypatch)
+    monkeypatch.setenv("APP_ENV", "local")
+
+    response = client.get("/cameras/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert {row["camera_id"] for row in payload} == {
+        "gate_01",
+        "lobby_02",
+        "dock_03",
+    }
+    assert all(row["source"].startswith("sample://") for row in payload)
+
+
+def test_cameras_health_does_not_return_sample_in_production(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    camera_health_registry.reset()
+    client, _ = make_client(tmp_path, monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+
+    response = client.get("/cameras/health")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_seed_dashboard_data_writes_dashboard_schema_rows(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "events.db"
+    snapshot_dir = tmp_path / "snapshots"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "seed_dashboard_data.py",
+            "--db-path",
+            str(db_path),
+            "--snapshot-dir",
+            str(snapshot_dir),
+            "--count",
+            "20",
+        ],
+    )
+
+    seed_dashboard_data()
+
+    repository = EventRepository(db_path)
+    events = repository.list_events(limit=20)
+    payload = events[0]["payload_json"]
+
+    assert len(events) == 20
+    assert events[0]["event_type"]
+    assert events[0]["camera_id"]
+    assert events[0]["track_id"] >= 1000
+    assert events[0]["snapshot_path"]
+    assert Path(events[0]["snapshot_path"]).is_file()
+    assert events[0]["created_at"]
+    assert '"rule_name"' in payload
+    assert '"severity"' in payload
+    assert '"confidence"' in payload
+    assert '"bbox"' in payload
+    assert '"duration_sec"' in payload
+    assert '"camera_name"' in payload
+    assert '"location"' in payload
 
 
 def test_snapshot_endpoint_serves_file_and_missing_returns_404(
