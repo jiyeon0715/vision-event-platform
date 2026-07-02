@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from datetime import datetime, time, timezone
 from html import escape
 from pathlib import Path
@@ -11,7 +12,12 @@ from urllib.parse import quote
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.responses import FileResponse, HTMLResponse
 
-from app.core.security import add_security_headers, docs_config, require_api_key
+from app.core.security import (
+    add_security_headers,
+    docs_config,
+    require_api_key,
+    require_dashboard_api_key,
+)
 from app.services.camera_health import camera_health_registry
 from storage.event_repository import EventRepository
 
@@ -36,8 +42,16 @@ def get_event_repository(
     return EventRepository(db_path)
 
 
-@app.get("/", response_class=HTMLResponse)
-@app.get("/dashboard", response_class=HTMLResponse)
+@app.get(
+    "/",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_dashboard_api_key)],
+)
+@app.get(
+    "/dashboard",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_dashboard_api_key)],
+)
 def dashboard(
     db_path: Annotated[Path, Depends(get_db_path)],
     repository: Annotated[EventRepository, Depends(get_event_repository)],
@@ -70,6 +84,30 @@ def health(db_path: Annotated[Path, Depends(get_db_path)]) -> dict[str, str]:
         "status": "ok",
         "db_path": str(db_path),
     }
+
+
+@app.get("/health/db", dependencies=[Depends(require_api_key)])
+def database_health(db_path: Annotated[Path, Depends(get_db_path)]) -> dict[str, str]:
+    result = {
+        "status": "ok",
+        "backend": "sqlite",
+        "db_path": str(db_path),
+    }
+
+    try:
+        with sqlite3.connect(db_path) as connection:
+            connection.execute("SELECT 1")
+    except sqlite3.Error as error:
+        result["status"] = "error"
+        result["error"] = error.__class__.__name__
+
+    if result["status"] != "ok":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=result,
+        )
+
+    return result
 
 
 @app.get("/events", dependencies=[Depends(require_api_key)])
@@ -133,7 +171,7 @@ def cameras_health() -> list[dict]:
     ]
 
 
-@app.get("/snapshots/{snapshot_path:path}")
+@app.get("/snapshots/{snapshot_path:path}", dependencies=[Depends(require_api_key)])
 def get_snapshot(
     snapshot_path: str,
     snapshot_dir: Annotated[Path, Depends(get_snapshot_dir)],

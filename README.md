@@ -227,7 +227,26 @@ The dashboard renders service status, event counts by rule and camera, current c
 
 ## Security Configuration
 
-Local development is open by default for portfolio viewing and quick testing. If `API_KEY` is not set, protected API routes do not require a key, and `/docs` remains available.
+Local development is open by default for portfolio viewing and quick testing. If `API_KEY` is not set, protected API routes do not require a key, and `/docs` remains available. In production mode, `/docs`, `/redoc`, and `/openapi.json` are disabled by default unless `ENABLE_DOCS=true` is set.
+
+Route exposure defaults:
+
+| Route | Local/default mode | Production mode |
+| --- | --- | --- |
+| `/` and `/dashboard` | Public dashboard | Public unless `PROTECT_DASHBOARD=true`; then requires `X-API-Key` |
+| `/health` | Public | Public |
+| `/health/db` | Requires `X-API-Key` only when `API_KEY` is set | Requires `X-API-Key` when `API_KEY` is set |
+| `/docs`, `/redoc`, `/openapi.json` | Public | Disabled by default; set `ENABLE_DOCS=true` to expose |
+| `/snapshots/*` | Requires `X-API-Key` only when `API_KEY` is set | Requires `X-API-Key` when `API_KEY` is set |
+| `/events`, `/events/latest`, `/events/stats`, `/cameras/health` | Requires `X-API-Key` only when `API_KEY` is set | Requires `X-API-Key` when `API_KEY` is set |
+
+Set `PROTECT_DASHBOARD=true` with `API_KEY` to protect the portfolio dashboard:
+
+```bash
+export API_KEY="change-me"
+export PROTECT_DASHBOARD=true
+curl -H "X-API-Key: change-me" http://localhost:8000/dashboard
+```
 
 For a production-like run, set `API_KEY` and pass it with the `X-API-Key` header when calling protected APIs:
 
@@ -236,13 +255,20 @@ export API_KEY="change-me"
 curl -H "X-API-Key: change-me" "http://localhost:8000/events/latest?limit=5"
 ```
 
-The dashboard route `/` stays accessible for local portfolio demos. Protected routes include `/events`, `/events/latest`, `/events/stats`, `/cameras/health`, and `/health/db`.
+The dashboard route `/` stays accessible for local portfolio demos unless `PROTECT_DASHBOARD=true`. Protected routes include `/events`, `/events/latest`, `/events/stats`, `/cameras/health`, `/snapshots/*`, and `/health/db`.
 
-Swagger docs are enabled in local/dev mode. In production, docs can be disabled:
+Swagger docs are enabled in local/dev mode. In production, docs are disabled by default:
 
 ```bash
 export APP_ENV=production
-export ENABLE_DOCS=false
+uvicorn main:app
+```
+
+To explicitly expose docs in production:
+
+```bash
+export APP_ENV=production
+export ENABLE_DOCS=true
 uvicorn main:app
 ```
 

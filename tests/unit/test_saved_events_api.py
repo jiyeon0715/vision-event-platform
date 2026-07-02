@@ -25,6 +25,7 @@ def make_client(tmp_path, monkeypatch) -> tuple[TestClient, str]:
     db_path = tmp_path / "events.db"
     snapshot_dir = tmp_path / "snapshots"
     monkeypatch.delenv("API_KEY", raising=False)
+    monkeypatch.delenv("PROTECT_DASHBOARD", raising=False)
     monkeypatch.setenv("EVENT_DB_PATH", str(db_path))
     monkeypatch.setenv("SNAPSHOT_DIR", str(snapshot_dir))
     return TestClient(app), str(db_path)
@@ -40,6 +41,24 @@ def test_health_returns_status_and_db_path(tmp_path, monkeypatch) -> None:
         "status": "ok",
         "db_path": db_path,
     }
+
+
+def test_database_health_requires_api_key_when_configured(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    client, _ = make_client(tmp_path, monkeypatch)
+    monkeypatch.setenv("API_KEY", "secret-key")
+
+    response = client.get("/health/db")
+    authorized_response = client.get(
+        "/health/db",
+        headers={"X-API-Key": "secret-key"},
+    )
+
+    assert response.status_code == 401
+    assert authorized_response.status_code == 200
+    assert authorized_response.json()["status"] == "ok"
 
 
 def test_list_events_supports_limit_offset_and_event_type(tmp_path, monkeypatch) -> None:
@@ -218,6 +237,28 @@ def test_snapshot_endpoint_serves_file_and_missing_returns_404(
     assert missing_response.status_code == 404
 
 
+def test_snapshot_endpoint_requires_api_key_when_configured(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    client, _ = make_client(tmp_path, monkeypatch)
+    snapshot_dir = tmp_path / "snapshots"
+    camera_snapshot_dir = snapshot_dir / "gate_01"
+    camera_snapshot_dir.mkdir(parents=True)
+    (camera_snapshot_dir / "event-1.jpg").write_bytes(b"jpeg bytes")
+    monkeypatch.setenv("API_KEY", "secret-key")
+
+    response = client.get("/snapshots/gate_01/event-1.jpg")
+    authorized_response = client.get(
+        "/snapshots/gate_01/event-1.jpg",
+        headers={"X-API-Key": "secret-key"},
+    )
+
+    assert response.status_code == 401
+    assert authorized_response.status_code == 200
+    assert authorized_response.content == b"jpeg bytes"
+
+
 def test_snapshot_endpoint_blocks_path_traversal(tmp_path, monkeypatch) -> None:
     client, _ = make_client(tmp_path, monkeypatch)
     outside_file = tmp_path / "outside.jpg"
@@ -240,3 +281,44 @@ def test_root_route_serves_dashboard(tmp_path, monkeypatch) -> None:
     assert "Vision Events Dashboard" in response.text
     assert "danger_zone" in response.text
     assert "<td>7</td>" in response.text
+
+
+def test_dashboard_remains_public_by_default_with_api_key(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    monkeypatch.setenv("API_KEY", "secret-key")
+    repository = EventRepository(db_path)
+    repository.save(make_event(event_type="danger_zone", track_id=8))
+
+    root_response = client.get("/")
+    dashboard_response = client.get("/dashboard")
+
+    assert root_response.status_code == 200
+    assert dashboard_response.status_code == 200
+    assert "Vision Events Dashboard" in root_response.text
+    assert "Vision Events Dashboard" in dashboard_response.text
+
+
+def test_dashboard_can_require_api_key(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    monkeypatch.setenv("API_KEY", "secret-key")
+    monkeypatch.setenv("PROTECT_DASHBOARD", "true")
+    repository = EventRepository(db_path)
+    repository.save(make_event(event_type="danger_zone", track_id=9))
+
+    root_response = client.get("/")
+    dashboard_response = client.get("/dashboard")
+    authorized_response = client.get(
+        "/dashboard",
+        headers={"X-API-Key": "secret-key"},
+    )
+
+    assert root_response.status_code == 401
+    assert dashboard_response.status_code == 401
+    assert authorized_response.status_code == 200
+    assert "Vision Events Dashboard" in authorized_response.text

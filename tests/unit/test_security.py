@@ -28,6 +28,17 @@ def test_docs_can_be_disabled_in_production(monkeypatch) -> None:
     assert client.get("/openapi.json").status_code == 404
 
 
+def test_docs_and_openapi_disabled_by_default_in_production(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("ENABLE_DOCS", raising=False)
+
+    app = FastAPI(**docs_config())
+    client = TestClient(app)
+
+    assert client.get("/docs").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
+
+
 def test_security_headers_are_added() -> None:
     app = FastAPI()
     add_security_headers(app)
