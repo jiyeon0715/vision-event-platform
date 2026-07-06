@@ -1,25 +1,44 @@
-# Vision Event Platform
+# Edge AI Vision Event Monitoring Platform
 
-A real-time computer vision event platform that turns object detection and tracking output into queryable operational events.
+영상 기반 이벤트를 감지하거나 수신하고, 이를 저장한 뒤 실시간 Dashboard에서 확인할 수 있는 Edge AI Vision Event Monitoring Platform입니다.
 
-The project demonstrates how a video analytics backend can be structured beyond a single model inference script: frames are processed through detection, tracking, configurable rules, alert throttling, snapshot storage, database persistence, and FastAPI endpoints for monitoring and review.
+이 프로젝트는 단순히 모델 추론 결과를 출력하는 데서 끝나지 않고, 카메라 입력, 객체 감지, 추적, 규칙 기반 이벤트 판정, 알림 중복 제어, 스냅샷 저장, 데이터베이스 영속화, REST API, WebSocket 기반 실시간 Dashboard까지 이어지는 백엔드 중심 구조를 보여주는 것을 목표로 합니다.
 
-## Project Overview
+## 프로젝트 소개
 
-Vision Event Platform is designed for security, facility operations, and safety-monitoring scenarios where teams need to detect meaningful activity from camera feeds and inspect the resulting events later.
+Vision Event Platform은 보안, 시설 운영, 안전 모니터링처럼 카메라에서 발생하는 이벤트를 빠르게 확인하고 나중에 조회해야 하는 상황을 가정해 만든 포트폴리오 프로젝트입니다.
 
-Instead of treating every detection as an alert, the system applies rule-based event evaluation. A camera stream is processed by a YOLO detector, a ByteTrack-style tracker, and one or more configurable rules such as danger-zone entry, loitering, and person-count thresholds. Events are filtered by an alert policy, optionally saved with frame snapshots, and exposed through API endpoints for dashboards or downstream services.
+카메라 영상은 YOLO detector와 ByteTrack 스타일 tracker를 거쳐 객체와 track 단위로 정리됩니다. 이후 danger-zone 진입, loitering, person-count 같은 규칙이 적용되고, alert cooldown 정책을 통해 반복 이벤트를 줄입니다. 승인된 이벤트는 SQLite 또는 PostgreSQL에 저장할 수 있으며, 필요한 경우 이벤트 발생 프레임을 JPEG 스냅샷으로 남깁니다.
 
-The current implementation supports:
+FastAPI는 이벤트 조회용 REST API, Dashboard 페이지, Dashboard가 사용하는 WebSocket endpoint를 제공합니다. 로컬 개발 환경에서는 SQLite를 기본 저장소로 사용하며, Docker Compose 실행에서는 PostgreSQL을 사용할 수 있습니다.
 
-- Single-video and multi-camera local pipeline runs.
-- Config-driven camera and rule definitions.
-- Per-camera health tracking during runtime.
-- SQLite for local development and PostgreSQL for Docker Compose runs.
-- FastAPI endpoints for health checks, event reads, event statistics, and camera health.
-- Snapshot file storage for persisted event review.
+## 주요 기능
 
-## Architecture
+- **Edge AI 이벤트 파이프라인**: 영상 프레임을 감지, 추적, 규칙 평가, 이벤트 저장 단계로 처리합니다.
+- **규칙 기반 이벤트 판정**: danger-zone, loitering, person-count 이벤트를 설정 기반으로 적용합니다.
+- **멀티 카메라 처리**: `config/config.yaml`에 정의된 여러 카메라 입력을 처리하고 이벤트에 `camera_id`를 기록합니다.
+- **Alert cooldown**: 같은 규칙에서 반복적으로 발생하는 이벤트가 저장소와 API client를 과도하게 채우지 않도록 제어합니다.
+- **이벤트 스냅샷 저장**: 이벤트 발생 시점의 프레임을 `data/snapshots/{camera_id}` 아래에 JPEG로 저장할 수 있습니다.
+- **REST API**: health check, 이벤트 목록, 최신 이벤트, 이벤트 통계, 카메라 상태를 제공합니다.
+- **실시간 Dashboard**: `/dashboard`에서 최신 이벤트, 이벤트 통계, 카메라 health, 스냅샷 썸네일을 확인합니다.
+- **WebSocket 이벤트 스트림**: `/ws/events`로 새 이벤트를 실시간 전송합니다.
+- **보안 설정**: 환경 변수로 API key 보호, Dashboard 보호, 문서 노출 여부를 제어합니다.
+- **테스트 가능한 구조**: 파이프라인, 규칙, repository, API, 보안 설정, camera health를 pytest로 검증합니다.
+
+## 기술 스택
+
+| 영역 | 기술 |
+| --- | --- |
+| API | FastAPI, Pydantic, Uvicorn |
+| Vision | OpenCV, Ultralytics YOLO |
+| Tracking | ByteTrack 스타일 tracker, `lapx` |
+| Rule Engine | Python rule evaluator, YAML 기반 설정 |
+| Persistence | SQLAlchemy, SQLite, PostgreSQL, psycopg |
+| Dashboard | FastAPI HTML response, REST polling fallback, WebSocket |
+| Runtime | Python 3.12, Docker, Docker Compose |
+| Test | pytest, httpx, FastAPI TestClient |
+
+## 시스템 아키텍처
 
 ```mermaid
 flowchart LR
@@ -32,101 +51,85 @@ flowchart LR
     G --> H["Event snapshots<br/>data/snapshots/{camera_id}"]
     G --> I["Event repository<br/>SQLite or PostgreSQL"]
     C --> J["CameraHealthRegistry"]
-    I --> K["FastAPI"]
+    I --> K["FastAPI REST API"]
     J --> K
-    K --> L["Dashboard or API clients"]
+    K --> L["Dashboard<br/>/dashboard"]
+    K --> M["WebSocket<br/>/ws/events"]
 ```
 
-### Request/Data Flow
+처리 흐름은 다음과 같습니다.
 
-1. Camera definitions are loaded from `config/config.yaml`, or a legacy single video path is passed on the command line.
-2. The runner creates one `VisionEventPipeline` context per camera.
-3. Each frame is detected once, tracked once, then evaluated by all enabled rules.
-4. Emitted events receive a `camera_id` and pass through `AlertPolicy` cooldown filtering.
-5. Approved events can be printed, saved to the database, and paired with a JPEG snapshot.
-6. FastAPI reads persisted events and aggregate statistics from the database.
-7. Runtime camera health is kept in memory and exposed through `/cameras/health`.
+1. 카메라 입력은 `config/config.yaml` 또는 CLI 인자로 전달됩니다.
+2. `scripts/run_video.py`가 카메라별 `VisionEventPipeline` context를 생성합니다.
+3. 각 프레임은 detector, tracker, rule engine을 순서대로 통과합니다.
+4. 발생한 이벤트는 `camera_id`와 함께 alert cooldown 정책을 거칩니다.
+5. 저장 옵션이 켜져 있으면 이벤트 metadata와 snapshot path가 데이터베이스에 저장됩니다.
+6. FastAPI가 저장된 이벤트, 통계, 카메라 상태를 API와 Dashboard로 제공합니다.
+7. Dashboard는 `/ws/events`를 통해 새 이벤트를 실시간으로 수신합니다.
 
-## Features
-
-- **Vision pipeline orchestration**: coordinates detector, tracker, rules, alert policy, persistence, and health reporting.
-- **Plugin-style rule loading**: enables rules from YAML configuration without changing the runner.
-- **Event rules**: supports danger-zone, loitering, and person-count event types.
-- **Alert cooldowns**: prevents repeated notifications for the same rule from flooding storage or clients.
-- **Multi-camera support**: processes configured camera sources and stamps every event with `camera_id`.
-- **Snapshot capture**: writes event frame JPEGs to per-camera folders and stores the snapshot path with the event.
-- **Database abstraction**: supports local SQLite and PostgreSQL through SQLAlchemy URLs.
-- **Operational API**: exposes health checks, event reads, event statistics, and camera health endpoints.
-- **Dockerized runtime**: includes an app container and PostgreSQL service through Docker Compose.
-- **Testable design**: core pipeline, rules, repository behavior, API routes, config loading, and camera health are covered by unit tests.
-
-## Tech Stack
-
-| Area | Technologies |
-| --- | --- |
-| API | FastAPI, Pydantic, Uvicorn |
-| Vision | OpenCV, Ultralytics YOLO |
-| Tracking | ByteTrack-style tracker, `lapx` |
-| Rules | Config-driven Python rule evaluators |
-| Persistence | SQLAlchemy, SQLite, PostgreSQL, psycopg |
-| Runtime | Python 3.12, Docker, Docker Compose |
-| Testing | pytest, httpx |
-
-## Repository Structure
+## 프로젝트 구조
 
 ```text
 app/
-  api/                 FastAPI routes
-  core/                settings and config loading
-  database/            SQLAlchemy models, sessions, health checks
+  api/                 FastAPI REST route
+  core/                설정 로딩, 보안 설정, 환경 변수 처리
+  database/            SQLAlchemy model, session, database health check
   detector/            YOLO detector adapter
   pipeline/            frame-to-event orchestration
   repositories/        database-backed event repository
-  rules/               event rule evaluators and loader
-  services/            camera health registry and event service
-  tracker/             tracking adapters
-config/config.yaml     camera, rule, alert, and database configuration
-scripts/run_video.py   local and container video pipeline runner
-storage/               local SQLite repository used by runner flows
-tests/                 unit and integration test suite
-docker/Dockerfile      production-like API image
+  rules/               danger-zone, loitering, person-count rule
+  schemas/             API response schema
+  services/            camera health registry, event service
+  tracker/             tracking adapter
+api/
+  main.py              local demo Dashboard API, WebSocket, SQLite saved-event API
+  dashboard_assets.py  Dashboard HTML/CSS/JS renderer
+config/config.yaml     camera, rule, alert, database 설정
+scripts/run_video.py   local/container video pipeline runner
+scripts/seed_dashboard_data.py
+                       local Dashboard demo data 생성
+storage/               SQLite 기반 saved-event repository
+tests/                 unit/integration test suite
+docker/Dockerfile      API container image
 docker-compose.yml     API + PostgreSQL stack
 ```
 
-## Local Run
+## 실행 방법
 
-Install dependencies:
+### 1. 의존성 설치
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Start the FastAPI app:
+### 2. 기본 FastAPI 앱 실행
+
+프로젝트의 기본 API entrypoint는 `main:app`입니다.
 
 ```bash
 uvicorn main:app --reload
 ```
 
-Local development uses SQLite by default via `config/config.yaml`:
+로컬 개발 설정은 `config/config.yaml` 기준으로 SQLite를 사용합니다.
 
 ```text
 sqlite:///data/events.db
 ```
 
-Check service health:
+Health check:
 
 ```bash
 curl http://localhost:8000/health
 curl http://localhost:8000/health/db
 ```
 
-Run the pipeline against one local video:
+### 3. 단일 영상 파이프라인 실행
 
 ```bash
 python scripts/run_video.py /path/to/video.mp4 --camera-id gate_01
 ```
 
-Save emitted events and snapshots locally:
+이벤트와 스냅샷을 로컬에 저장하려면 다음 옵션을 사용합니다.
 
 ```bash
 python scripts/run_video.py /path/to/video.mp4 \
@@ -136,13 +139,13 @@ python scripts/run_video.py /path/to/video.mp4 \
   --snapshot-dir data/snapshots
 ```
 
-Run configured multi-camera sources:
+### 4. 설정 파일 기반 멀티 카메라 실행
 
 ```bash
 python scripts/run_video.py --config config/config.yaml
 ```
 
-Example camera configuration:
+예시 설정:
 
 ```yaml
 cameras:
@@ -152,36 +155,28 @@ cameras:
     source: data/videos/video2.mp4
 ```
 
-## Docker Run
+### 5. Docker Compose 실행
 
-Docker deployment uses PostgreSQL. `docker-compose.yml` explicitly injects `DATABASE_URL` into the app container, which overrides the local SQLite setting from `config/config.yaml`.
-
-Run the full stack with PostgreSQL:
+Docker Compose는 PostgreSQL을 함께 실행합니다. `docker-compose.yml`에서 `DATABASE_URL`을 app container에 주입하므로 `config/config.yaml`의 SQLite 설정보다 우선합니다.
 
 ```bash
 docker compose up --build
 ```
 
-The API is available at:
+API 주소:
 
 ```text
 http://localhost:8000
 ```
 
-Docker Compose starts:
+Compose 구성:
 
-- `app`: FastAPI service running `main:app`.
-- `postgres`: PostgreSQL 16 with a health check.
-- `postgres_data`: named volume for durable database data.
-- `./data:/app/data`: bind mount for local videos, SQLite files, and event snapshots.
+- `app`: `main:app`을 실행하는 FastAPI service
+- `postgres`: health check가 포함된 PostgreSQL 16 service
+- `postgres_data`: database volume
+- `./data:/app/data`: 로컬 영상, SQLite 파일, snapshot 저장용 bind mount
 
-The app container receives:
-
-```text
-DATABASE_URL=postgresql://vision:vision@postgres:5432/vision_events
-```
-
-Run the video pipeline inside the Compose app container:
+Container 내부에서 영상 파이프라인 실행:
 
 ```bash
 docker compose exec app python scripts/run_video.py \
@@ -190,15 +185,13 @@ docker compose exec app python scripts/run_video.py \
   --save-events
 ```
 
-Verify persisted events:
+저장된 이벤트 확인:
 
 ```bash
 curl "http://localhost:8000/events/latest?limit=5"
 ```
 
-### API Image Only
-
-Build and run only the API image:
+### 6. API image만 실행
 
 ```bash
 docker build -f docker/Dockerfile -t vision-event-platform .
@@ -209,113 +202,25 @@ docker run --rm -p 8000:8000 \
   vision-event-platform
 ```
 
-## Demo Dashboard
+## 주요 API
 
-The primary API entry point is `main:app`. The repository also includes a lightweight saved-events dashboard in `api.main` for local portfolio demos that read from the runner's SQLite database:
+`main:app`은 운영 API에 가까운 entrypoint이고, `api.main:app`은 로컬 포트폴리오 Dashboard와 SQLite saved-event API를 포함한 demo entrypoint입니다. 두 앱 모두 FastAPI 기반이며, Dashboard 관련 route는 `api.main:app`에서 제공합니다.
 
-Seed local sample events and snapshots:
+| Method | Path | 설명 | 인증 |
+| --- | --- | --- | --- |
+| `GET` | `/health` | 서비스 상태 확인 | public |
+| `GET` | `/health/db` | DB 연결 상태 확인 | `API_KEY` 설정 시 `X-API-Key` 필요 |
+| `GET` | `/events` | 최근 이벤트 목록 조회 | `API_KEY` 설정 시 `X-API-Key` 필요 |
+| `GET` | `/events/latest` | 최신 이벤트 조회 | `API_KEY` 설정 시 `X-API-Key` 필요 |
+| `GET` | `/events/{event_id}` | 단일 이벤트 조회 | `main:app`에서는 public |
+| `GET` | `/events/stats` | 이벤트 통계 조회 | `API_KEY` 설정 시 `X-API-Key` 필요 |
+| `GET` | `/stats` | Dashboard용 통계 alias | `api.main:app`에서 제공 |
+| `GET` | `/cameras/health` | 런타임 카메라 상태 조회 | `API_KEY` 설정 시 `X-API-Key` 필요 |
+| `GET` | `/snapshots/{snapshot_path}` | 저장된 snapshot 조회 | `api.main:app`에서 제공, `API_KEY` 설정 시 `X-API-Key` 필요 |
+| `GET` | `/`, `/dashboard` | Dashboard 페이지 | `PROTECT_DASHBOARD=true`일 때 `X-API-Key` 필요 |
+| `WS` | `/ws/events` | 실시간 이벤트 스트림 | `PROTECT_DASHBOARD=true`일 때 header 또는 query API key 필요 |
 
-```bash
-python scripts/seed_dashboard_data.py
-```
-
-The seed script inserts 36 sample events into `data/events.db` by default and writes thumbnail snapshots under `data/snapshots`. Use `--count 20` through `--count 50` to control the sample size, or `--reset` to replace existing rows:
-
-```bash
-python scripts/seed_dashboard_data.py --reset --count 40
-```
-
-Start the dashboard API:
-
-```bash
-EVENT_DB_PATH=data/events.db SNAPSHOT_DIR=data/snapshots uvicorn api.main:app --reload
-```
-
-Open:
-
-```text
-http://localhost:8000/dashboard
-```
-
-The dashboard renders service status, event counts by rule and camera, current camera health, recent saved events, and snapshot thumbnails when `snapshot_path` is present.
-
-The dashboard also opens a realtime WebSocket stream at `/ws/events`. On connect it receives the latest saved SQLite rows, then the server polls for newly inserted events and pushes each new event payload to connected browsers. The frontend reconnects automatically if the socket drops and still keeps the existing REST refresh as a fallback for summaries and health rows.
-
-To verify the realtime dashboard locally:
-
-```bash
-python scripts/seed_dashboard_data.py --reset --count 20
-EVENT_DB_PATH=data/events.db SNAPSHOT_DIR=data/snapshots uvicorn api.main:app --reload
-```
-
-Open `http://localhost:8000/dashboard`, then in a second terminal insert more local rows:
-
-```bash
-python scripts/seed_dashboard_data.py --count 20
-```
-
-The Latest Events table should update without a full page reload. You can also connect directly with any WebSocket client that supports local URLs:
-
-```text
-ws://localhost:8000/ws/events
-ws://localhost:8000/ws/events?camera_id=gate_01
-```
-
-When no runtime camera pipeline is active, `api.main` returns sample camera health rows only in local/dev/test mode so the Dashboard can be inspected after seeding. Set `APP_ENV=production` for production-like runs; sample camera health fallback is disabled outside local environments.
-
-## Security Configuration
-
-Local development is open by default for portfolio viewing and quick testing. If `API_KEY` is not set, protected API routes do not require a key, and `/docs` remains available. In production mode, `/docs`, `/redoc`, and `/openapi.json` are disabled by default unless `ENABLE_DOCS=true` is set.
-
-Route exposure defaults:
-
-| Route | Local/default mode | Production mode |
-| --- | --- | --- |
-| `/` and `/dashboard` | Public dashboard | Public unless `PROTECT_DASHBOARD=true`; then requires `X-API-Key` |
-| `/health` | Public | Public |
-| `/health/db` | Requires `X-API-Key` only when `API_KEY` is set | Requires `X-API-Key` when `API_KEY` is set |
-| `/docs`, `/redoc`, `/openapi.json` | Public | Disabled by default; set `ENABLE_DOCS=true` to expose |
-| `/snapshots/*` | Requires `X-API-Key` only when `API_KEY` is set | Requires `X-API-Key` when `API_KEY` is set |
-| `/events`, `/events/latest`, `/events/stats`, `/cameras/health` | Requires `X-API-Key` only when `API_KEY` is set | Requires `X-API-Key` when `API_KEY` is set |
-| `/ws/events` | Public realtime stream unless `PROTECT_DASHBOARD=true` | Public unless `PROTECT_DASHBOARD=true`; then requires `X-API-Key` header or `api_key` query parameter |
-
-Set `PROTECT_DASHBOARD=true` with `API_KEY` to protect the portfolio dashboard:
-
-```bash
-export API_KEY="change-me"
-export PROTECT_DASHBOARD=true
-curl -H "X-API-Key: change-me" http://localhost:8000/dashboard
-```
-
-For a production-like run, set `API_KEY` and pass it with the `X-API-Key` header when calling protected APIs:
-
-```bash
-export API_KEY="change-me"
-curl -H "X-API-Key: change-me" "http://localhost:8000/events/latest?limit=5"
-```
-
-The dashboard route `/` stays accessible for local portfolio demos unless `PROTECT_DASHBOARD=true`. Protected routes include `/events`, `/events/latest`, `/events/stats`, `/cameras/health`, `/snapshots/*`, and `/health/db`.
-
-Swagger docs are enabled in local/dev mode. In production, docs are disabled by default:
-
-```bash
-export APP_ENV=production
-uvicorn main:app
-```
-
-To explicitly expose docs in production:
-
-```bash
-export APP_ENV=production
-export ENABLE_DOCS=true
-uvicorn main:app
-```
-
-Snapshot files are served only from `SNAPSHOT_DIR` and invalid or traversal paths return 404.
-
-## API Examples
-
-### Health
+Health:
 
 ```bash
 curl http://localhost:8000/health
@@ -327,35 +232,20 @@ curl http://localhost:8000/health
 }
 ```
 
-```bash
-curl http://localhost:8000/health/db
-```
-
-With `API_KEY` set:
-
-```bash
-curl -H "X-API-Key: change-me" http://localhost:8000/health/db
-```
-
-```json
-{
-  "status": "ok",
-  "backend": "sqlite"
-}
-```
-
-### Latest Events
+Latest events:
 
 ```bash
 curl "http://localhost:8000/events/latest?limit=5&camera_id=gate_01"
 ```
 
-With `API_KEY` set:
+`API_KEY`가 설정된 경우:
 
 ```bash
 curl -H "X-API-Key: change-me" \
   "http://localhost:8000/events/latest?limit=5&camera_id=gate_01"
 ```
+
+응답 예시:
 
 ```json
 [
@@ -365,151 +255,175 @@ curl -H "X-API-Key: change-me" \
     "camera_id": "gate_01",
     "track_id": 42,
     "timestamp": 123.45,
-    "message": "Track 42 stayed inside the danger zone.",
-    "snapshot_path": "data/snapshots/gate_01/2f7c6f6d0a7f4f94a6a0c1fd7b7d9e91.jpg",
+    "snapshot_path": "data/snapshots/gate_01/example.jpg",
     "created_at": "2026-06-22T10:30:00Z"
   }
 ]
 ```
 
-### Single Event
-
-```bash
-curl http://localhost:8000/events/1
-```
-
-### Event Statistics
+Event statistics:
 
 ```bash
 curl "http://localhost:8000/events/stats?camera_id=gate_01&rule_name=danger_zone"
 ```
 
-With `API_KEY` set:
-
-```bash
-curl -H "X-API-Key: change-me" \
-  "http://localhost:8000/events/stats?camera_id=gate_01&rule_name=danger_zone"
-```
-
-```json
-{
-  "total_event_count": 12,
-  "event_count_by_rule_name": {
-    "danger_zone": 12
-  },
-  "event_count_by_camera_id": {
-    "gate_01": 12
-  },
-  "hourly_event_counts": {
-    "2026-06-22T10:00:00Z": 7,
-    "2026-06-22T11:00:00Z": 5
-  },
-  "latest_event_timestamp": "2026-06-22T11:14:08Z"
-}
-```
-
-### Camera Health
+Camera health:
 
 ```bash
 curl http://localhost:8000/cameras/health
 ```
 
-With `API_KEY` set:
-
-```bash
-curl -H "X-API-Key: change-me" http://localhost:8000/cameras/health
-```
-
-```json
-[
-  {
-    "camera_id": "gate_01",
-    "source": "data/videos/video1.mp4",
-    "status": "online",
-    "last_frame_at": "2026-06-22T10:30:00Z",
-    "last_event_at": "2026-06-22T10:30:03Z",
-    "processed_frame_count": 1800,
-    "emitted_event_count": 4,
-    "last_error": null
-  }
-]
-```
-
-## Screenshots and Snapshots
-
-This repository stores event evidence as generated image snapshots rather than committed demo screenshots.
-
-When `scripts/run_video.py` emits an event, it writes the current frame as a JPEG under:
+WebSocket:
 
 ```text
-data/snapshots/{camera_id}/{uuid}.jpg
+ws://localhost:8000/ws/events
+ws://localhost:8000/ws/events?camera_id=gate_01
 ```
 
-The saved event stores that location in `snapshot_path`, allowing an API client or dashboard to show a thumbnail beside the event metadata. The per-camera folder structure makes it easy to inspect events by source and avoids filename collisions when multiple cameras emit events at the same time.
+## 실시간 Dashboard
 
-Because snapshots are generated from local video inputs, `data/snapshots/.gitkeep` is committed but generated JPEGs are expected to remain local runtime artifacts.
+Dashboard는 `api.main:app`에서 제공하는 로컬 demo UI입니다. 저장된 SQLite 이벤트를 읽어 최신 이벤트, 이벤트 통계, 카메라 health, snapshot thumbnail을 보여줍니다.
 
-## Testing Result
-
-The test suite is organized around unit coverage for the behavior that matters most in an interview or production-readiness review:
-
-- Pipeline orchestration and camera id propagation.
-- Danger-zone, loitering, and person-count rule behavior.
-- Alert cooldown policy.
-- SQLite and SQLAlchemy event repository behavior.
-- Saved event API responses and query filtering.
-- Event statistics API behavior.
-- Runtime camera health state.
-- Configuration loading.
-- Snapshot path creation in the video runner.
-- API-key protection, docs visibility, security headers, and snapshot traversal blocking.
-- Database health checks.
-
-Run tests with:
+로컬 demo data 생성:
 
 ```bash
-pytest
+python scripts/seed_dashboard_data.py
 ```
 
-For lighter CI environments that should avoid native vision/tracking dependency builds:
+기본적으로 `data/events.db`에 sample event 36개를 넣고 `data/snapshots` 아래에 thumbnail snapshot을 생성합니다. 개수를 조정하거나 기존 row를 초기화할 수 있습니다.
+
+```bash
+python scripts/seed_dashboard_data.py --reset --count 40
+```
+
+Dashboard API 실행:
+
+```bash
+EVENT_DB_PATH=data/events.db SNAPSHOT_DIR=data/snapshots uvicorn api.main:app --reload
+```
+
+브라우저에서 열기:
+
+```text
+http://localhost:8000/dashboard
+```
+
+실시간 동작 확인:
+
+```bash
+python scripts/seed_dashboard_data.py --reset --count 20
+EVENT_DB_PATH=data/events.db SNAPSHOT_DIR=data/snapshots uvicorn api.main:app --reload
+```
+
+다른 터미널에서 이벤트를 추가합니다.
+
+```bash
+python scripts/seed_dashboard_data.py --count 20
+```
+
+`Latest Events` table은 페이지 전체 새로고침 없이 `/ws/events` 스트림을 통해 갱신됩니다. WebSocket 연결이 끊기면 frontend는 자동 재연결을 시도하고, summary와 health row는 REST refresh를 fallback으로 유지합니다.
+
+로컬, dev, test 환경에서 runtime camera pipeline이 실행 중이 아니면 `api.main`은 Dashboard 확인을 위해 sample camera health row를 반환할 수 있습니다. 운영에 가까운 실행에서는 반드시 `APP_ENV=production`을 설정해야 하며, production mode에서는 sample fallback behavior가 노출되지 않습니다.
+
+## 테스트
+
+테스트는 핵심 동작이 회귀하지 않도록 다음 영역을 검증합니다.
+
+- Vision pipeline orchestration과 `camera_id` 전파
+- danger-zone, loitering, person-count rule
+- alert cooldown policy
+- SQLite 및 SQLAlchemy event repository
+- saved-event API 응답과 filtering
+- event statistics API
+- runtime camera health state
+- config loading
+- video runner snapshot path 생성
+- API key 보호, docs visibility, security header, snapshot traversal 차단
+- database health check
+
+전체 테스트 실행:
+
+```bash
+python -m pytest
+```
+
+가벼운 CI 환경에서 vision/tracking native dependency 설치 부담을 줄이려면:
 
 ```bash
 pip install -r requirements-ci.txt
-pytest
+python -m pytest
 ```
 
-## Future Improvements
+## 보안/운영 메모
 
-- Add a small dashboard frontend that renders event lists, statistics, camera health, and snapshot thumbnails.
-- Add optional authentication for snapshot evidence endpoints when serving non-local deployments.
-- Add async or background worker execution for long-running camera streams.
-- Support RTSP camera sources and reconnection/backoff policies.
-- Persist camera health history for operational trend analysis.
-- Add event acknowledgement, severity, and review workflow fields.
-- Add migrations with Alembic for production database changes.
-- Add CI jobs for linting, unit tests, Docker image build, and API smoke tests.
-- Add model configuration profiles for CPU/GPU environments.
-- Add structured logging and metrics export for observability.
+로컬 개발은 포트폴리오 확인과 빠른 테스트를 위해 기본적으로 열려 있습니다. `API_KEY`가 설정되지 않으면 보호 대상 API도 key 없이 접근할 수 있고, `/docs`도 노출됩니다.
 
-## Interview-Friendly Explanation
+API key 설정:
 
-This project is a backend-oriented computer vision system, not just a model demo. The main design decision is separating detection from event semantics. YOLO answers "what objects are in the frame," tracking answers "which object is which over time," and the rule layer answers "does this behavior matter operationally?"
+```bash
+export API_KEY="change-me"
+curl -H "X-API-Key: change-me" "http://localhost:8000/events/latest?limit=5"
+```
 
-The pipeline is intentionally modular:
+Dashboard 관련 route까지 보호하려면 `PROTECT_DASHBOARD=true`를 함께 설정합니다.
 
-- The detector and tracker can be swapped behind small interfaces.
-- Rules are loaded from configuration and evaluated against the same track list.
-- Alert policy is isolated so cooldown behavior is testable.
-- Persistence is behind a repository boundary and can target SQLite or PostgreSQL.
-- FastAPI exposes read models for dashboards without coupling clients to the video runner.
+```bash
+export API_KEY="change-me"
+export PROTECT_DASHBOARD=true
+curl -H "X-API-Key: change-me" http://localhost:8000/dashboard
+```
 
-In an interview, the system can be described as an event-driven architecture for video analytics:
+운영에 가까운 실행에서는 docs가 기본적으로 비활성화됩니다.
 
-1. Ingest frames from one or more camera sources.
-2. Convert frames into detections and stable tracks.
-3. Evaluate tracks against business rules.
-4. Filter noisy repeats with alert policy.
-5. Store event metadata and snapshots.
-6. Expose APIs for monitoring, querying, and dashboard consumption.
+```bash
+export APP_ENV=production
+uvicorn main:app
+```
 
-The strongest engineering points are the clear boundaries between pipeline stages, config-driven rule behavior, database portability, API testability, and operational features such as camera health and event statistics.
+운영 환경에서 명시적으로 docs를 열어야 할 때만 다음 값을 사용합니다.
+
+```bash
+export APP_ENV=production
+export ENABLE_DOCS=true
+uvicorn main:app
+```
+
+Route 노출 기본값:
+
+| Route | local/default | production |
+| --- | --- | --- |
+| `/`, `/dashboard` | public dashboard | `PROTECT_DASHBOARD=true`이면 `X-API-Key` 필요 |
+| `/health` | public | public |
+| `/health/db` | `API_KEY` 설정 시 `X-API-Key` 필요 | `API_KEY` 설정 시 `X-API-Key` 필요 |
+| `/docs`, `/redoc`, `/openapi.json` | public | 기본 비활성화, `ENABLE_DOCS=true`일 때 노출 |
+| `/snapshots/*` | `API_KEY` 설정 시 `X-API-Key` 필요 | `API_KEY` 설정 시 `X-API-Key` 필요 |
+| `/events`, `/events/latest`, `/events/stats`, `/cameras/health` | `API_KEY` 설정 시 `X-API-Key` 필요 | `API_KEY` 설정 시 `X-API-Key` 필요 |
+| `/ws/events` | `PROTECT_DASHBOARD=true`가 아니면 public | `PROTECT_DASHBOARD=true`이면 `X-API-Key` header 또는 `api_key` query 필요 |
+
+Snapshot은 `SNAPSHOT_DIR` 아래 파일만 제공하며, 잘못된 경로나 directory traversal 시도는 404로 처리됩니다. Local/dev/test의 sample fallback data는 Dashboard demo 확인용이며, production에서는 노출하지 않는 것을 전제로 합니다.
+
+## 향후 개선 예정
+
+- RTSP 카메라 입력과 재연결/backoff 정책 추가
+- 장시간 카메라 stream 처리를 위한 background worker 또는 async 실행 구조 개선
+- 카메라 health history 저장과 운영 trend 분석
+- 이벤트 확인, 심각도, 처리 상태 같은 review workflow field 추가
+- Alembic 기반 database migration 추가
+- lint, unit test, Docker image build, API smoke test를 포함한 CI pipeline 구성
+- CPU/GPU 환경별 model configuration profile 정리
+- structured logging과 metrics export를 통한 observability 강화
+
+## 면접에서 설명할 수 있는 포인트
+
+이 프로젝트는 모델 학습 프로젝트가 아니라, 영상 분석 결과를 운영 이벤트로 바꾸는 백엔드 시스템에 가깝습니다. YOLO는 프레임 안의 객체를 찾고, tracker는 객체의 연속성을 유지하며, rule layer는 그 움직임이 실제로 의미 있는 이벤트인지 판단합니다.
+
+구조적으로는 detector, tracker, rule, alert policy, repository, API layer를 분리했습니다. 덕분에 각 단계의 책임이 비교적 명확하고, 특정 detector나 database에 강하게 묶이지 않으며, API와 rule behavior를 테스트하기 쉽습니다.
+
+인터뷰에서는 다음 흐름으로 설명할 수 있습니다.
+
+1. 카메라 또는 영상 파일에서 frame을 입력받습니다.
+2. detector와 tracker가 객체와 track을 생성합니다.
+3. rule engine이 운영상 의미 있는 이벤트를 판정합니다.
+4. alert policy가 반복 이벤트를 줄입니다.
+5. event metadata와 snapshot을 저장합니다.
+6. FastAPI가 REST API, Dashboard, WebSocket stream으로 이벤트를 제공합니다.
