@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
+import api.main as dashboard_api
 from app.services.camera_health import camera_health_registry
 from api.main import app
 from scripts.seed_dashboard_data import main as seed_dashboard_data
@@ -126,6 +128,71 @@ def test_latest_events_supports_camera_id_filter(tmp_path, monkeypatch) -> None:
 
     assert response.status_code == 200
     assert [event["track_id"] for event in response.json()] == [3, 1]
+
+
+def test_events_websocket_accepts_connection(tmp_path, monkeypatch) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    repository = EventRepository(db_path)
+    repository.save(make_event(track_id=1))
+
+    with client.websocket_connect("/ws/events") as websocket:
+        payload = websocket.receive_json()
+
+    assert payload["track_id"] == 1
+    assert payload["event_type"] == "danger_zone"
+    assert payload["payload"] == make_event(track_id=1)
+
+
+def test_events_websocket_receives_new_event_payload(tmp_path, monkeypatch) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    repository = EventRepository(db_path)
+    monkeypatch.setattr(dashboard_api, "EVENT_STREAM_POLL_SECONDS", 0.01)
+
+    with client.websocket_connect("/ws/events") as websocket:
+        repository.save(make_event(event_type="line_crossing", track_id=12))
+        payload = websocket.receive_json()
+
+    assert payload["track_id"] == 12
+    assert payload["event_type"] == "line_crossing"
+    assert payload["camera_id"] == "camera-1"
+
+
+def test_events_websocket_respects_camera_id_filter(tmp_path, monkeypatch) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    repository = EventRepository(db_path)
+    repository.save(make_event(track_id=1, camera_id="gate_01"))
+    repository.save(make_event(track_id=2, camera_id="gate_02"))
+
+    with client.websocket_connect("/ws/events?camera_id=gate_02") as websocket:
+        payload = websocket.receive_json()
+
+    assert payload["track_id"] == 2
+    assert payload["camera_id"] == "gate_02"
+
+
+def test_events_websocket_requires_api_key_when_dashboard_is_protected(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    client, db_path = make_client(tmp_path, monkeypatch)
+    monkeypatch.setenv("API_KEY", "secret-key")
+    monkeypatch.setenv("PROTECT_DASHBOARD", "true")
+    repository = EventRepository(db_path)
+    repository.save(make_event(track_id=1))
+
+    try:
+        with client.websocket_connect("/ws/events"):
+            raise AssertionError("WebSocket connection should have been rejected")
+    except WebSocketDisconnect as error:
+        assert error.code == 1008
+
+    with client.websocket_connect(
+        "/ws/events",
+        headers={"X-API-Key": "secret-key"},
+    ) as websocket:
+        payload = websocket.receive_json()
+
+    assert payload["track_id"] == 1
 
 
 def test_stats_returns_total_and_counts_by_type(tmp_path, monkeypatch) -> None:

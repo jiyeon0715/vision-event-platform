@@ -1064,6 +1064,8 @@ def _dashboard_template() -> str:
       const AUTO_REFRESH_MS = 30000;
       const LOW_FPS_THRESHOLD = 20;
       const PAGE_SIZE = 10;
+      const WS_RECONNECT_BASE_MS = 1000;
+      const WS_RECONNECT_MAX_MS = 15000;
       const COLORS = ["#ff4048", "#ff7a1a", "#f5c400", "#8b5cf6", "#64748b", "#14b8a6", "#3b82f6"];
 
       const parseBootstrap = () => JSON.parse(document.getElementById("dashboard-bootstrap").textContent || "{}");
@@ -1084,6 +1086,8 @@ def _dashboard_template() -> str:
         page: 1,
         loading: false,
         lastError: null,
+        socket: { instance: null, reconnectTimer: null, retry: 0, closedByClient: false },
+        realtimeRefreshTimer: null,
       };
 
       const el = {
@@ -1394,6 +1398,104 @@ def _dashboard_template() -> str:
         }
       };
 
+      const buildEventStreamUrl = () => {
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const url = new URL(`${protocol}//${window.location.host}/ws/events`);
+        if (state.filters.camera) {
+          url.searchParams.set("camera_id", state.filters.camera);
+        }
+        return url;
+      };
+
+      const connectEventStream = () => {
+        if (!("WebSocket" in window)) return;
+        if (state.socket.reconnectTimer) {
+          window.clearTimeout(state.socket.reconnectTimer);
+          state.socket.reconnectTimer = null;
+        }
+        if (state.socket.instance) {
+          state.socket.closedByClient = true;
+          state.socket.instance.close();
+        }
+
+        state.socket.closedByClient = false;
+        const socket = new WebSocket(buildEventStreamUrl());
+        state.socket.instance = socket;
+
+        socket.addEventListener("open", () => {
+          state.socket.retry = 0;
+          el.lastUpdated.textContent = "Realtime event stream connected";
+        });
+
+        socket.addEventListener("message", (message) => {
+          try {
+            const event = JSON.parse(message.data);
+            mergeRealtimeEvent(event);
+          } catch (error) {
+            showToast(`Unable to read realtime event: ${error.message}`);
+          }
+        });
+
+        socket.addEventListener("close", () => {
+          if (state.socket.closedByClient) return;
+          scheduleEventStreamReconnect();
+        });
+
+        socket.addEventListener("error", () => {
+          socket.close();
+        });
+      };
+
+      const scheduleEventStreamReconnect = () => {
+        const delay = Math.min(
+          WS_RECONNECT_MAX_MS,
+          WS_RECONNECT_BASE_MS * Math.pow(2, state.socket.retry)
+        );
+        state.socket.retry += 1;
+        el.lastUpdated.textContent = `Realtime event stream reconnecting in ${Math.round(delay / 1000)} s`;
+        state.socket.reconnectTimer = window.setTimeout(connectEventStream, delay);
+      };
+
+      const mergeRealtimeEvent = (event) => {
+        if (!event || event.id === undefined || event.id === null) return;
+        if (state.filters.camera && getCamera(event) !== state.filters.camera) return;
+        const existingIndex = state.events.findIndex((item) => Number(item.id) === Number(event.id));
+        if (existingIndex >= 0) {
+          state.events.splice(existingIndex, 1, event);
+        } else {
+          state.events.unshift(event);
+        }
+        state.events = state.events
+          .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+          .slice(0, 500);
+        state.stats.latest_event_timestamp = event.created_at || state.stats.latest_event_timestamp;
+        state.page = 1;
+        el.lastUpdated.textContent = `Realtime update ${eventTime(event)}`;
+        renderAll();
+        refreshRealtimeContext();
+      };
+
+      const refreshRealtimeContext = () => {
+        if (state.realtimeRefreshTimer) return;
+        state.realtimeRefreshTimer = window.setTimeout(async () => {
+          state.realtimeRefreshTimer = null;
+          try {
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
+            const params = { start_at: todayStart.toISOString(), camera_id: state.filters.camera };
+            const [stats, health] = await Promise.all([
+              DashboardServices.stats(params),
+              DashboardServices.cameraHealth(),
+            ]);
+            state.stats = stats;
+            state.health = Array.isArray(health) ? health : [];
+            renderAll();
+          } catch (error) {
+            showToast(`Realtime summary refresh failed: ${error.message}`);
+          }
+        }, 250);
+      };
+
       const openPanel = (event) => {
         state.selectedEvent = event;
         const url = snapshotUrl(event.snapshot_path);
@@ -1456,7 +1558,7 @@ def _dashboard_template() -> str:
       el.cameraFilter.addEventListener("change", () => {
         state.filters.camera = el.cameraFilter.value;
         state.page = 1;
-        loadDashboard({ silent: true });
+        loadDashboard({ silent: true }).then(connectEventStream);
       });
       el.prevPage.addEventListener("click", () => { state.page = Math.max(1, state.page - 1); DashboardComponents.renderEvents(); });
       el.nextPage.addEventListener("click", () => { state.page += 1; DashboardComponents.renderEvents(); });
@@ -1472,7 +1574,7 @@ def _dashboard_template() -> str:
         if (!button) return;
         state.filters.camera = state.filters.camera === button.dataset.camera ? "" : button.dataset.camera;
         state.page = 1;
-        loadDashboard({ silent: true });
+        loadDashboard({ silent: true }).then(connectEventStream);
       });
       el.eventsBody.addEventListener("click", (event) => {
         const trigger = event.target.closest("[data-view-event], tr[data-event-id]");
@@ -1504,6 +1606,7 @@ def _dashboard_template() -> str:
       window.setInterval(updateClock, 1000);
       renderAll();
       loadDashboard({ silent: true });
+      connectEventStream();
       window.setInterval(() => loadDashboard({ silent: true }), AUTO_REFRESH_MS);
     })();
   </script>

@@ -239,6 +239,28 @@ http://localhost:8000/dashboard
 
 The dashboard renders service status, event counts by rule and camera, current camera health, recent saved events, and snapshot thumbnails when `snapshot_path` is present.
 
+The dashboard also opens a realtime WebSocket stream at `/ws/events`. On connect it receives the latest saved SQLite rows, then the server polls for newly inserted events and pushes each new event payload to connected browsers. The frontend reconnects automatically if the socket drops and still keeps the existing REST refresh as a fallback for summaries and health rows.
+
+To verify the realtime dashboard locally:
+
+```bash
+python scripts/seed_dashboard_data.py --reset --count 20
+EVENT_DB_PATH=data/events.db SNAPSHOT_DIR=data/snapshots uvicorn api.main:app --reload
+```
+
+Open `http://localhost:8000/dashboard`, then in a second terminal insert more local rows:
+
+```bash
+python scripts/seed_dashboard_data.py --count 20
+```
+
+The Latest Events table should update without a full page reload. You can also connect directly with any WebSocket client that supports local URLs:
+
+```text
+ws://localhost:8000/ws/events
+ws://localhost:8000/ws/events?camera_id=gate_01
+```
+
 When no runtime camera pipeline is active, `api.main` returns sample camera health rows only in local/dev/test mode so the Dashboard can be inspected after seeding. Set `APP_ENV=production` for production-like runs; sample camera health fallback is disabled outside local environments.
 
 ## Security Configuration
@@ -255,6 +277,7 @@ Route exposure defaults:
 | `/docs`, `/redoc`, `/openapi.json` | Public | Disabled by default; set `ENABLE_DOCS=true` to expose |
 | `/snapshots/*` | Requires `X-API-Key` only when `API_KEY` is set | Requires `X-API-Key` when `API_KEY` is set |
 | `/events`, `/events/latest`, `/events/stats`, `/cameras/health` | Requires `X-API-Key` only when `API_KEY` is set | Requires `X-API-Key` when `API_KEY` is set |
+| `/ws/events` | Public realtime stream unless `PROTECT_DASHBOARD=true` | Public unless `PROTECT_DASHBOARD=true`; then requires `X-API-Key` header or `api_key` query parameter |
 
 Set `PROTECT_DASHBOARD=true` with `API_KEY` to protect the portfolio dashboard:
 

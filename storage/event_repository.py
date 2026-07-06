@@ -126,6 +126,38 @@ class EventRepository:
 
         return [dict(row) for row in rows]
 
+    def list_events_after_id(
+        self,
+        event_id: int,
+        limit: int = 100,
+        camera_id: str | None = None,
+    ) -> list[dict]:
+        query = """
+            SELECT
+                id,
+                event_type,
+                camera_id,
+                track_id,
+                timestamp,
+                snapshot_path,
+                payload_json,
+                created_at
+            FROM events
+            WHERE id > ?
+        """
+        params: list[int | str] = [event_id]
+        if camera_id is not None:
+            query += " AND camera_id = ?"
+            params.append(camera_id)
+
+        query += " ORDER BY id ASC LIMIT ?"
+        params.append(limit)
+
+        with self._connect() as connection:
+            rows = connection.execute(query, tuple(params)).fetchall()
+
+        return [dict(row) for row in rows]
+
     def count_events(self) -> int:
         with self._connect() as connection:
             row = connection.execute("SELECT COUNT(*) AS count FROM events").fetchone()

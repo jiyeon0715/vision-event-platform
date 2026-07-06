@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sqlite3
 from datetime import datetime, time, timezone
+from hmac import compare_digest
 from html import escape
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, WebSocket, status
+from starlette.websockets import WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse
 
 from api.dashboard_assets import render_dashboard_html
@@ -25,6 +28,9 @@ from storage.event_repository import EventRepository
 
 DEFAULT_DB_PATH = Path("data/events.db")
 DEFAULT_SNAPSHOT_DIR = Path("data/snapshots")
+EVENT_STREAM_POLL_SECONDS = 1.0
+EVENT_STREAM_INITIAL_LIMIT = 10
+EVENT_STREAM_POLL_LIMIT = 100
 
 app = FastAPI(title="Vision Events API", **docs_config())
 add_security_headers(app)
@@ -196,6 +202,44 @@ def get_snapshot(
     return FileResponse(resolved_snapshot_path, media_type="image/jpeg")
 
 
+@app.websocket("/ws/events")
+async def events_websocket(
+    websocket: WebSocket,
+    camera_id: str | None = None,
+) -> None:
+    if not _dashboard_websocket_authorized(websocket):
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    await websocket.accept()
+    repository = EventRepository(get_db_path())
+    last_seen_id = 0
+
+    try:
+        initial_events = list(reversed(
+            repository.list_latest_events(
+                limit=EVENT_STREAM_INITIAL_LIMIT,
+                camera_id=camera_id,
+            )
+        ))
+        for event in initial_events:
+            last_seen_id = max(last_seen_id, int(event["id"]))
+            await websocket.send_json(_format_event(event))
+
+        while True:
+            await asyncio.sleep(EVENT_STREAM_POLL_SECONDS)
+            events = repository.list_events_after_id(
+                last_seen_id,
+                limit=EVENT_STREAM_POLL_LIMIT,
+                camera_id=camera_id,
+            )
+            for event in events:
+                last_seen_id = max(last_seen_id, int(event["id"]))
+                await websocket.send_json(_format_event(event))
+    except WebSocketDisconnect:
+        return
+
+
 def _format_event(event: dict) -> dict:
     readable_event = {
         "id": event["id"],
@@ -209,6 +253,23 @@ def _format_event(event: dict) -> dict:
     if event.get("snapshot_path") is not None:
         readable_event["snapshot_path"] = event["snapshot_path"]
     return readable_event
+
+
+def _dashboard_websocket_authorized(websocket: WebSocket) -> bool:
+    protect_dashboard = os.environ.get("PROTECT_DASHBOARD", "false").strip().lower()
+    if protect_dashboard not in {"1", "true", "yes", "on"}:
+        return True
+
+    expected_api_key = os.environ.get("API_KEY")
+    supplied_api_key = (
+        websocket.headers.get("x-api-key")
+        or websocket.query_params.get("api_key")
+    )
+    return bool(
+        expected_api_key
+        and supplied_api_key
+        and compare_digest(supplied_api_key, expected_api_key)
+    )
 
 
 def _parse_payload(payload_json: str) -> dict:
