@@ -33,3 +33,37 @@ class Event(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class Camera(Base):
+    """Managed camera or media source shown in dashboard views."""
+
+    __tablename__ = "cameras"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    source_uri: Mapped[str] = mapped_column(String(500), nullable=False)
+    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        index=True,
+        default="active",
+        server_default="active",
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

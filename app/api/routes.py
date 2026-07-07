@@ -3,6 +3,12 @@ from typing import Annotated, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from app.schemas.cameras import (
+    CameraCreate,
+    CameraListResponse,
+    CameraResponse,
+    CameraUpdate,
+)
 from app.core.security import require_api_key
 from app.schemas.events import EventListResponse, EventResponse, EventStatsResponse
 from app.schemas.health import CameraHealthResponse
@@ -48,6 +54,29 @@ class EventReader(Protocol):
         ...
 
 
+class CameraReaderWriter(Protocol):
+    def create(self, camera: CameraCreate) -> object:
+        ...
+
+    def list_cameras(
+        self,
+        page: int = 1,
+        limit: int = 100,
+        status: str | None = None,
+        source_type: str | None = None,
+    ) -> dict[str, object]:
+        ...
+
+    def get_by_id(self, camera_id: int) -> object | None:
+        ...
+
+    def update(self, camera_id: int, camera: CameraUpdate) -> object | None:
+        ...
+
+    def deactivate(self, camera_id: int) -> object | None:
+        ...
+
+
 @router.get("/health", tags=["health"])
 async def health_check() -> dict[str, str]:
     """Return a simple service health response."""
@@ -72,6 +101,12 @@ def get_event_repository() -> EventReader:
     from app.repositories.event_repository import EventRepository
 
     return EventRepository()
+
+
+def get_camera_repository() -> CameraReaderWriter:
+    from app.repositories.camera_repository import CameraRepository
+
+    return CameraRepository()
 
 
 @router.get(
@@ -113,6 +148,112 @@ async def event_stats(
 async def camera_health() -> list[object]:
     """Return runtime-only per-camera health state."""
     return camera_health_registry.list_health()
+
+
+@router.get(
+    "/cameras",
+    response_model=CameraListResponse,
+    tags=["cameras"],
+    dependencies=[Depends(require_api_key)],
+)
+async def list_cameras(
+    repository: Annotated[CameraReaderWriter, Depends(get_camera_repository)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    status: str | None = None,
+    source_type: str | None = None,
+) -> dict[str, object]:
+    """Return paginated managed cameras and media sources."""
+    result = repository.list_cameras(
+        page=page,
+        limit=limit,
+        status=status,
+        source_type=source_type,
+    )
+    total = int(result["total"])
+    return {
+        "items": result["items"],
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "total_pages": (total + limit - 1) // limit,
+    }
+
+
+@router.post(
+    "/cameras",
+    response_model=CameraResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["cameras"],
+    dependencies=[Depends(require_api_key)],
+)
+async def create_camera(
+    camera: CameraCreate,
+    repository: Annotated[CameraReaderWriter, Depends(get_camera_repository)],
+) -> object:
+    """Create a managed camera or media source."""
+    return repository.create(camera)
+
+
+@router.get(
+    "/cameras/{camera_id}",
+    response_model=CameraResponse,
+    tags=["cameras"],
+    dependencies=[Depends(require_api_key)],
+)
+async def get_camera(
+    camera_id: int,
+    repository: Annotated[CameraReaderWriter, Depends(get_camera_repository)],
+) -> object:
+    """Return one managed camera or media source by id."""
+    camera = repository.get_by_id(camera_id)
+    if camera is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Camera not found",
+        )
+    return camera
+
+
+@router.patch(
+    "/cameras/{camera_id}",
+    response_model=CameraResponse,
+    tags=["cameras"],
+    dependencies=[Depends(require_api_key)],
+)
+async def update_camera(
+    camera_id: int,
+    camera: CameraUpdate,
+    repository: Annotated[CameraReaderWriter, Depends(get_camera_repository)],
+) -> object:
+    """Update one managed camera or media source."""
+    updated = repository.update(camera_id, camera)
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Camera not found",
+        )
+    return updated
+
+
+@router.delete(
+    "/cameras/{camera_id}",
+    response_model=CameraResponse,
+    tags=["cameras"],
+    dependencies=[Depends(require_api_key)],
+)
+async def deactivate_camera(
+    camera_id: int,
+    repository: Annotated[CameraReaderWriter, Depends(get_camera_repository)],
+) -> object:
+    """Mark a managed camera or media source inactive."""
+    camera = repository.deactivate(camera_id)
+    if camera is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Camera not found",
+        )
+    return camera
 
 
 @router.get(
