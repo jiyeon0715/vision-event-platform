@@ -70,6 +70,8 @@ def test_save_accepts_dict_event_payload() -> None:
             "track_id": 7,
             "timestamp": 12.3,
             "message": "Track 7 stayed inside the danger zone.",
+            "severity": "critical",
+            "status": "new",
             "snapshot_path": "data/snapshots/event.jpg",
         }
     )
@@ -78,6 +80,8 @@ def test_save_accepts_dict_event_payload() -> None:
     assert persisted is not None
     assert persisted.track_id == 7
     assert persisted.camera_id == "gate_02"
+    assert persisted.severity == "critical"
+    assert persisted.status == "new"
     assert persisted.snapshot_path == "data/snapshots/event.jpg"
 
 
@@ -136,6 +140,60 @@ def test_list_recent_filters_by_camera_id() -> None:
     assert [event.camera_id for event in events] == ["gate_02"]
 
 
+def test_list_events_filters_and_paginates() -> None:
+    session = make_session()
+    repository = EventRepository(session=session)
+    session.add_all(
+        [
+            EventModel(
+                event_type="danger_zone",
+                camera_id="gate_01",
+                track_id=1,
+                timestamp=1.0,
+                message="First event",
+                severity="critical",
+                status="new",
+                created_at=datetime(2026, 6, 22, 10, 15, tzinfo=timezone.utc),
+            ),
+            EventModel(
+                event_type="danger_zone",
+                camera_id="gate_01",
+                track_id=2,
+                timestamp=2.0,
+                message="Second event",
+                severity="critical",
+                status="acknowledged",
+                created_at=datetime(2026, 6, 22, 10, 45, tzinfo=timezone.utc),
+            ),
+            EventModel(
+                event_type="loitering",
+                camera_id="gate_02",
+                track_id=3,
+                timestamp=3.0,
+                message="Third event",
+                severity="warning",
+                status="new",
+                created_at=datetime(2026, 6, 22, 11, 5, tzinfo=timezone.utc),
+            ),
+        ]
+    )
+    session.commit()
+
+    result = repository.list_events(
+        page=1,
+        limit=1,
+        camera_id="gate_01",
+        event_type="danger_zone",
+        severity="critical",
+        status="acknowledged",
+        date_from=datetime(2026, 6, 22, 10, 0, tzinfo=timezone.utc),
+        date_to=datetime(2026, 6, 22, 10, 59, tzinfo=timezone.utc),
+    )
+
+    assert result["total"] == 1
+    assert [event.track_id for event in result["items"]] == [2]
+
+
 def test_get_returns_event_by_id() -> None:
     session = make_session()
     repository = EventRepository(session=session)
@@ -159,6 +217,7 @@ def test_stats_aggregates_events_and_filters() -> None:
                 track_id=1,
                 timestamp=1.0,
                 message="First event",
+                status="new",
                 created_at=datetime(2026, 6, 22, 10, 15, tzinfo=timezone.utc),
             ),
             EventModel(
@@ -167,6 +226,7 @@ def test_stats_aggregates_events_and_filters() -> None:
                 track_id=2,
                 timestamp=2.0,
                 message="Second event",
+                status="acknowledged",
                 created_at=datetime(2026, 6, 22, 10, 45, tzinfo=timezone.utc),
             ),
             EventModel(
@@ -175,6 +235,7 @@ def test_stats_aggregates_events_and_filters() -> None:
                 track_id=3,
                 timestamp=3.0,
                 message="Third event",
+                status="new",
                 created_at=datetime(2026, 6, 22, 11, 5, tzinfo=timezone.utc),
             ),
         ]
@@ -190,8 +251,10 @@ def test_stats_aggregates_events_and_filters() -> None:
 
     assert stats == {
         "total_event_count": 2,
+        "event_count_by_type": {"danger_zone": 2},
         "event_count_by_rule_name": {"danger_zone": 2},
         "event_count_by_camera_id": {"gate_01": 2},
+        "event_count_by_status": {"acknowledged": 1, "new": 1},
         "hourly_event_counts": {"2026-06-22T10:00:00": 2},
         "latest_event_timestamp": datetime(2026, 6, 22, 10, 45),
     }

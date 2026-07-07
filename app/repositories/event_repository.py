@@ -5,7 +5,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models import Event as EventModel
@@ -58,6 +58,55 @@ class EventRepository:
         with self._session_factory() as session:
             return list(session.scalars(statement).all())
 
+    def list_events(
+        self,
+        page: int = 1,
+        limit: int = 100,
+        camera_id: str | None = None,
+        event_type: str | None = None,
+        severity: str | None = None,
+        status: str | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> dict[str, object]:
+        base_statement = _apply_event_filters(
+            select(EventModel),
+            camera_id=camera_id,
+            event_type=event_type,
+            severity=severity,
+            status=status,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        count_statement = _apply_event_filters(
+            select(func.count()).select_from(EventModel),
+            camera_id=camera_id,
+            event_type=event_type,
+            severity=severity,
+            status=status,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        offset = (page - 1) * limit
+        page_statement = (
+            base_statement.order_by(EventModel.created_at.desc(), EventModel.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+
+        if self._session is not None:
+            total = int(self._session.scalar(count_statement) or 0)
+            items = list(self._session.scalars(page_statement).all())
+            return {"items": items, "total": total}
+
+        if self._session_factory is None:
+            raise RuntimeError("EventRepository requires a session or session factory")
+
+        with self._session_factory() as session:
+            total = int(session.scalar(count_statement) or 0)
+            items = list(session.scalars(page_statement).all())
+            return {"items": items, "total": total}
+
     def get(self, event_id: int) -> EventModel | None:
         if self._session is not None:
             return self._session.get(EventModel, event_id)
@@ -73,21 +122,26 @@ class EventRepository:
         start_at: datetime | None = None,
         end_at: datetime | None = None,
         camera_id: str | None = None,
+        event_type: str | None = None,
         rule_name: str | None = None,
+        severity: str | None = None,
+        status: str | None = None,
     ) -> dict[str, object]:
-        statement = select(EventModel)
-        if start_at is not None:
-            statement = statement.where(EventModel.created_at >= start_at)
-        if end_at is not None:
-            statement = statement.where(EventModel.created_at <= end_at)
-        if camera_id is not None:
-            statement = statement.where(EventModel.camera_id == camera_id)
-        if rule_name is not None:
-            statement = statement.where(EventModel.event_type == rule_name)
+        event_type_filter = event_type if event_type is not None else rule_name
+        statement = _apply_event_filters(
+            select(EventModel),
+            camera_id=camera_id,
+            event_type=event_type_filter,
+            severity=severity,
+            status=status,
+            date_from=start_at,
+            date_to=end_at,
+        )
 
         events = self._list_for_statement(statement)
-        rule_counts = Counter(event.event_type or "unknown" for event in events)
+        type_counts = Counter(event.event_type or "unknown" for event in events)
         camera_counts = Counter(event.camera_id or "unknown" for event in events)
+        status_counts = Counter(event.status or "unknown" for event in events)
         hourly_counts = Counter(_hour_bucket(event.created_at) for event in events)
         latest_event_timestamp = max(
             (event.created_at for event in events),
@@ -96,8 +150,10 @@ class EventRepository:
 
         return {
             "total_event_count": len(events),
-            "event_count_by_rule_name": dict(sorted(rule_counts.items())),
+            "event_count_by_type": dict(sorted(type_counts.items())),
+            "event_count_by_rule_name": dict(sorted(type_counts.items())),
             "event_count_by_camera_id": dict(sorted(camera_counts.items())),
+            "event_count_by_status": dict(sorted(status_counts.items())),
             "hourly_event_counts": dict(sorted(hourly_counts.items())),
             "latest_event_timestamp": latest_event_timestamp,
         }
@@ -114,6 +170,8 @@ class EventRepository:
                 track_id=_event_field(event, "track_id"),
                 timestamp=_event_field(event, "timestamp"),
                 message=_event_field(event, "message"),
+                severity=_event_field(event, "severity", None),
+                status=_event_field(event, "status", None),
                 snapshot_path=_event_field(event, "snapshot_path", None),
             )
             for event in event_list
@@ -149,6 +207,30 @@ def _event_field(event: EventRecord, field_name: str, default: object = None) ->
     if isinstance(event, Mapping):
         return event.get(field_name, default)
     return getattr(event, field_name, default)
+
+
+def _apply_event_filters(
+    statement: object,
+    camera_id: str | None = None,
+    event_type: str | None = None,
+    severity: str | None = None,
+    status: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+) -> object:
+    if camera_id is not None:
+        statement = statement.where(EventModel.camera_id == camera_id)
+    if event_type is not None:
+        statement = statement.where(EventModel.event_type == event_type)
+    if severity is not None:
+        statement = statement.where(EventModel.severity == severity)
+    if status is not None:
+        statement = statement.where(EventModel.status == status)
+    if date_from is not None:
+        statement = statement.where(EventModel.created_at >= date_from)
+    if date_to is not None:
+        statement = statement.where(EventModel.created_at <= date_to)
+    return statement
 
 
 def _hour_bucket(value: datetime) -> str:

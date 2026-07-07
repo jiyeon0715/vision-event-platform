@@ -25,6 +25,8 @@ class Event(Base):
     track_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     timestamp: Mapped[float] = mapped_column(Float, nullable=False)
     message: Mapped[str] = mapped_column(String(500), nullable=False)
+    severity: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     snapshot_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -16,6 +16,8 @@ def initialize_database(engine: Engine | None = None) -> None:
     active_engine = engine or get_engine()
     Base.metadata.create_all(bind=active_engine)
     _ensure_camera_id_column(active_engine)
+    _ensure_optional_event_column(active_engine, "severity", "VARCHAR(32)")
+    _ensure_optional_event_column(active_engine, "status", "VARCHAR(32)")
 
 
 def _ensure_camera_id_column(engine: Engine) -> None:
@@ -33,6 +35,21 @@ def _ensure_camera_id_column(engine: Engine) -> None:
                 "ALTER TABLE events "
                 "ADD COLUMN camera_id VARCHAR(128) NOT NULL DEFAULT 'default'"
             )
+        )
+
+
+def _ensure_optional_event_column(engine: Engine, column_name: str, column_type: str) -> None:
+    inspector = inspect(engine)
+    if not inspector.has_table("events"):
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("events")}
+    if column_name in columns:
+        return
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(f"ALTER TABLE events ADD COLUMN {column_name} {column_type}")
         )
 
 
