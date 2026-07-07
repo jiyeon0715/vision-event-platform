@@ -18,6 +18,7 @@ from app.core.config import load_settings
 from app.database.urls import database_backend, redact_database_url
 from app.services.camera_health import camera_health_registry
 from storage.event_repository import EventRepository as SqliteEventRepository
+from vision.inputs.video_file_source import VideoFileSource
 
 DEFAULT_SNAPSHOT_DIR = Path("data/snapshots")
 DEFAULT_CAMERA_ID = "default"
@@ -126,7 +127,13 @@ def _process_camera(
     event_repository: Any | None,
 ) -> int:
     video_path = camera.source
-    if not video_path.is_file():
+    try:
+        frame_source = VideoFileSource(
+            video_path,
+            source_id=camera.id,
+            cv2_module=cv2,
+        )
+    except FileNotFoundError:
         camera_health_registry.mark_error(
             camera.id,
             f"Video file not found: {video_path}",
@@ -137,9 +144,7 @@ def _process_camera(
             file=sys.stderr,
         )
         return 1
-
-    capture = cv2.VideoCapture(str(video_path))
-    if not capture.isOpened():
+    except RuntimeError:
         camera_health_registry.mark_error(
             camera.id,
             f"Unable to open video file: {video_path}",
@@ -157,22 +162,14 @@ def _process_camera(
         camera_source=str(camera.source),
     )
     snapshot_dir = args.snapshot_dir
-    fps = capture.get(cv2.CAP_PROP_FPS) or 0.0
-    frame_index = 0
 
     try:
-        while True:
-            ok, frame = capture.read()
-            if not ok:
-                print("Reached end of video.")
-                break
-
-            timestamp = _frame_timestamp(capture, frame_index, fps)
-            events = pipeline.process_frame(frame, timestamp)
+        for packet in frame_source:
+            events = pipeline.process_frame(packet.frame, packet.timestamp)
             for event in events:
                 event_dict = _event_to_dict(event)
                 snapshot_path = save_event_snapshot(
-                    frame,
+                    packet.frame,
                     snapshot_dir,
                     camera_id=camera.id,
                 )
@@ -180,10 +177,9 @@ def _process_camera(
                 print(json.dumps(event_dict, sort_keys=True))
                 if event_repository is not None:
                     event_repository.save(event_dict)
-
-            frame_index += 1
+        print("Reached end of video.")
     finally:
-        capture.release()
+        frame_source.close()
 
     return 0
 
@@ -217,17 +213,6 @@ def bind_from_session_factory(session_factory: Any) -> Any:
     if bind is None:
         raise RuntimeError("Session factory is missing a database bind")
     return bind
-
-
-def _frame_timestamp(capture: cv2.VideoCapture, frame_index: int, fps: float) -> float:
-    timestamp_msec = capture.get(cv2.CAP_PROP_POS_MSEC)
-    if timestamp_msec > 0:
-        return timestamp_msec / 1000.0
-
-    if fps > 0:
-        return frame_index / fps
-
-    return float(frame_index)
 
 
 def _event_to_dict(event: Any) -> dict[str, Any]:
