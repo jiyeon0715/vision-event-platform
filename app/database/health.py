@@ -5,7 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import get_settings
 from app.database.base import Base
-from app.database.models import Camera, Event, EventType
+from app.database.models import Camera, Event, EventType, Snapshot
 from app.database.session import get_engine
 from app.database.urls import database_backend
 
@@ -136,6 +136,7 @@ __all__ = [
     "Camera",
     "Event",
     "EventType",
+    "Snapshot",
     "check_database_health",
     "initialize_database",
 ]

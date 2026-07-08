@@ -18,6 +18,7 @@ from app.schemas.event_types import (
 )
 from app.schemas.events import EventListResponse, EventResponse, EventStatsResponse
 from app.schemas.health import CameraHealthResponse
+from app.schemas.snapshots import SnapshotListResponse, SnapshotResponse
 from app.services.camera_health import camera_health_registry
 
 router = APIRouter()
@@ -112,6 +113,22 @@ class EventTypeReaderWriter(Protocol):
         ...
 
 
+class SnapshotReaderWriter(Protocol):
+    def create(self, snapshot: object) -> object:
+        ...
+
+    def list_by_event(
+        self,
+        event_id: int,
+        page: int = 1,
+        limit: int = 100,
+    ) -> dict[str, object]:
+        ...
+
+    def get_by_id(self, snapshot_id: int) -> object | None:
+        ...
+
+
 @router.get("/health", tags=["health"])
 async def health_check() -> dict[str, str]:
     """Return a simple service health response."""
@@ -148,6 +165,12 @@ def get_event_type_repository() -> EventTypeReaderWriter:
     from app.repositories.event_type_repository import EventTypeRepository
 
     return EventTypeRepository()
+
+
+def get_snapshot_repository() -> SnapshotReaderWriter:
+    from app.repositories.snapshot_repository import SnapshotRepository
+
+    return SnapshotRepository()
 
 
 @router.get(
@@ -488,3 +511,53 @@ async def get_event(
             detail="Event not found",
         )
     return event
+
+
+@router.get(
+    "/snapshots/{snapshot_id}",
+    response_model=SnapshotResponse,
+    response_model_exclude_none=True,
+    tags=["snapshots"],
+    dependencies=[Depends(require_api_key)],
+)
+async def get_snapshot(
+    snapshot_id: int,
+    repository: Annotated[SnapshotReaderWriter, Depends(get_snapshot_repository)],
+) -> object:
+    """Return one event snapshot by id."""
+    snapshot = repository.get_by_id(snapshot_id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Snapshot not found",
+        )
+    return snapshot
+
+
+@router.get(
+    "/events/{event_id}/snapshots",
+    response_model=SnapshotListResponse,
+    response_model_exclude_none=True,
+    tags=["snapshots"],
+    dependencies=[Depends(require_api_key)],
+)
+async def list_event_snapshots(
+    event_id: int,
+    repository: Annotated[SnapshotReaderWriter, Depends(get_snapshot_repository)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+) -> dict[str, object]:
+    """Return paginated snapshots for one event."""
+    result = repository.list_by_event(
+        event_id=event_id,
+        page=page,
+        limit=limit,
+    )
+    total = int(result["total"])
+    return {
+        "items": result["items"],
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "total_pages": (total + limit - 1) // limit,
+    }
