@@ -1,8 +1,8 @@
 # Dependencies required for GitHub Actions unit tests.
 # Runtime-heavy vision/tracking packages stay in requirements.txt.
-fastapi
-pydantic
-PyYAML
-SQLAlchemy
-pytest
-httpx
+fastapi>=0.110.0,<1
+pydantic>=2.6.0,<3
+PyYAML>=6.0,<7
+SQLAlchemy>=2.0.0,<3
+pytest>=8.0.0,<9
+httpx>=0.27.0,<1

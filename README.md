@@ -2,9 +2,9 @@
 
 ## 프로젝트 소개
 
-Edge AI Vision Event Monitoring Platform은 로컬 영상 파일을 입력으로 받아 객체를 검출하고, 추적 결과에 규칙을 적용해 이벤트를 생성하는 FastAPI 기반 프로젝트입니다.
+AI Vision Monitoring Platform은 이미지/영상 입력으로부터 AI 이벤트를 생성하고, 생성된 이벤트를 Backend에서 관리하며, Next.js Dashboard에서 조회/검색/통계를 제공하는 웹서비스입니다.
 
-현재 구현은 영상 파일 기반 파이프라인, 이벤트 저장, REST API, 대시보드 확인 기능을 중심으로 구성되어 있습니다. 실제 카메라 실시간 스트림 연동과 운영 배포 구성이 완료된 상태는 아닙니다.
+현재 구현은 영상 파일 기반 파이프라인, 이벤트 저장, REST API(`main:app`), Next.js 기반 Dashboard를 중심으로 구성되어 있습니다. 실제 카메라 실시간 스트림 연동과 운영 배포 구성은 진행 중입니다.
 
 ## 시스템 아키텍처
 
@@ -12,7 +12,7 @@ Edge AI Vision Event Monitoring Platform은 로컬 영상 파일을 입력으로
 
 ```mermaid
 flowchart TD
-    A["Video File"] --> B["OpenCV VideoCapture"]
+    A["Video / Image File"] --> B["OpenCV"]
     B --> C["VisionEventPipeline"]
     C --> D["YOLO Detector"]
     D --> E["ByteTrack Tracker"]
@@ -20,11 +20,9 @@ flowchart TD
     F --> G["AlertPolicy"]
     G --> H["Event Repository"]
     G --> I["Snapshot Files"]
-    H --> J["SQLite / SQLAlchemy DB"]
-    J --> K["FastAPI REST API"]
-    J --> L["Dashboard API"]
-    L --> M["Dashboard"]
-    L --> N["WebSocket Event Updates"]
+    H --> J["SQLite / PostgreSQL"]
+    J --> K["FastAPI REST API (main:app)"]
+    K --> L["Next.js Dashboard"]
 ```
 
 `scripts/run_video.py`가 영상 파일을 프레임 단위로 읽고 `VisionEventPipeline`에 전달합니다. 파이프라인은 객체 검출, 객체 추적, 규칙 평가, 알림 중복 제어를 거쳐 이벤트를 만들고, 저장 옵션이 켜져 있으면 이벤트와 snapshot을 저장합니다.
@@ -36,11 +34,10 @@ flowchart TD
 - Rule Engine 기반 이벤트 생성
 - danger-zone, loitering, person-count 규칙
 - Alert cooldown 기반 반복 이벤트 제어
-- 이벤트 저장
+- 이벤트 저장 (SQLite / PostgreSQL)
 - 이벤트 발생 프레임 snapshot 저장
-- REST API를 통한 이벤트 조회
-- 대시보드 화면을 통한 저장 이벤트 확인
-- WebSocket 기반 이벤트 갱신
+- REST API를 통한 이벤트 조회 / 검색 / 통계
+- Next.js Dashboard에서 Events, Cameras, EventTypes 관리
 - API key 기반 보호 설정
 - pytest 기반 단위 테스트
 
@@ -53,32 +50,31 @@ flowchart TD
 | Tracking | ByteTrack 스타일 tracker, `lapx` |
 | Rule | Python rule evaluator, YAML 설정 |
 | Persistence | SQLAlchemy, SQLite, PostgreSQL driver |
-| Dashboard | FastAPI HTML response, JavaScript, WebSocket |
+| Frontend | Next.js 14, TypeScript, Tailwind CSS |
 | Test | pytest, httpx, FastAPI TestClient |
 | Runtime | Python 3.12, Docker, Docker Compose |
 
 ## 프로젝트 구조
 
 ```text
-main.py                  기본 FastAPI 앱 entrypoint
-api/main.py              대시보드용 FastAPI 앱 entrypoint
-api/dashboard_assets.py  대시보드 HTML/CSS/JS 렌더링
+main.py                  FastAPI 앱 entrypoint (uvicorn main:app)
 app/
-  api/                   기본 REST API route
+  api/                   REST API routes
   core/                  설정 로딩, 보안 설정
   database/              SQLAlchemy model, session, health check
   detector/              YOLO detector adapter
   pipeline/              frame-to-event orchestration
-  repositories/          SQLAlchemy 기반 event repository
+  repositories/          SQLAlchemy 기반 repository (Event, Camera, EventType, Snapshot)
   rules/                 danger-zone, loitering, person-count rule
-  schemas/               API response schema
-  services/              camera health registry, event service
-  tracker/               tracking adapter
-storage/                 SQLite 전용 saved-event repository
+  schemas/               Pydantic request/response schema
+  services/              camera health registry
+  tracker/               ByteTrack adapter
+vision/
+  inputs/                FrameSource (ImageSource, VideoFileSource)
 config/config.yaml       app, database, camera, rule, alert 설정
 scripts/run_video.py     로컬 영상 파일 파이프라인 실행
-scripts/seed_dashboard_data.py
-                         대시보드 확인용 sample event 생성
+scripts/run_image.py     로컬 이미지 파이프라인 실행
+frontend/                Next.js 14 Dashboard
 tests/                   unit/integration test suite
 docker/Dockerfile        컨테이너 이미지 정의
 docker-compose.yml       app + PostgreSQL 로컬 실행 구성
@@ -113,7 +109,7 @@ curl http://localhost:8000/health/db
 python scripts/run_video.py /path/to/video.mp4 --camera-id gate_01
 ```
 
-이벤트와 snapshot을 저장하려면 다음 옵션을 사용합니다.
+이벤트와 snapshot을 저장하려면 `--save-events` 옵션을 사용합니다. 기본적으로 `data/events.db` SQLite를 사용합니다.
 
 ```bash
 python scripts/run_video.py /path/to/video.mp4 \
@@ -123,28 +119,18 @@ python scripts/run_video.py /path/to/video.mp4 \
   --snapshot-dir data/snapshots
 ```
 
+PostgreSQL 등 다른 DB를 사용하려면 `--database-url` 또는 `DATABASE_URL` 환경변수를 설정합니다.
+
+```bash
+DATABASE_URL=postgresql://user:pass@localhost/vision python scripts/run_video.py \
+  /path/to/video.mp4 --camera-id gate_01 --save-events
+```
+
 설정 파일에 정의된 camera 목록을 사용하려면 다음 명령을 실행합니다.
 
 ```bash
 python scripts/run_video.py --config config/config.yaml
 ```
-
-### 대시보드 실행
-
-대시보드는 `api.main:app`에서 제공합니다. 기본적으로 `data/events.db`와 `data/snapshots`를 사용합니다.
-
-```bash
-python scripts/seed_dashboard_data.py --reset --count 40
-EVENT_DB_PATH=data/events.db SNAPSHOT_DIR=data/snapshots uvicorn api.main:app --reload
-```
-
-브라우저에서 다음 주소를 엽니다.
-
-```text
-http://localhost:8000/dashboard
-```
-
-대시보드의 WebSocket은 저장된 이벤트를 주기적으로 확인해 새 이벤트를 화면에 반영합니다.
 
 ### Next.js Frontend 실행
 
@@ -196,28 +182,29 @@ docker compose exec app python scripts/run_video.py \
 
 ## 주요 API
 
-`main:app`의 기본 API:
+entrypoint: `uvicorn main:app`
 
 | Method | Path | 설명 |
 | --- | --- | --- |
 | `GET` | `/health` | 서비스 상태 확인 |
 | `GET` | `/health/db` | DB 연결 상태 확인 |
-| `GET` | `/events` | 최근 이벤트 목록 조회 |
+| `GET` | `/events` | 이벤트 목록 조회 (pagination, filter) |
 | `GET` | `/events/latest` | 최신 이벤트 조회 |
 | `GET` | `/events/{event_id}` | 단일 이벤트 조회 |
 | `GET` | `/events/stats` | 이벤트 통계 조회 |
-| `GET` | `/cameras/health` | 런타임 메모리 기준 카메라 health 조회 |
+| `GET` | `/events/{event_id}/snapshots` | 이벤트 snapshot 목록 |
+| `GET` | `/cameras` | 카메라 목록 조회 |
+| `POST` | `/cameras` | 카메라 등록 |
+| `GET` | `/cameras/{id}` | 카메라 단건 조회 |
+| `PATCH` | `/cameras/{id}` | 카메라 수정 |
+| `DELETE` | `/cameras/{id}` | 카메라 비활성화 |
+| `GET` | `/cameras/health` | 런타임 카메라 health 조회 |
+| `GET` | `/event-types` | EventType 목록 조회 |
+| `POST` | `/event-types` | EventType 등록 |
+| `PATCH` | `/event-types/{id}` | EventType 수정 |
+| `DELETE` | `/event-types/{id}` | EventType 비활성화 |
 
-`api.main:app`에서 제공하는 대시보드 관련 API:
-
-| Method | Path | 설명 |
-| --- | --- | --- |
-| `GET` | `/`, `/dashboard` | 대시보드 HTML |
-| `GET` | `/stats` | 대시보드용 통계 alias |
-| `GET` | `/snapshots/{snapshot_path}` | snapshot 파일 조회 |
-| `WS` | `/ws/events` | 저장 이벤트 갱신용 WebSocket |
-
-`API_KEY`가 설정된 경우 보호 대상 API에는 `X-API-Key` header를 전달해야 합니다.
+`API_KEY` 환경변수가 설정된 경우 보호 대상 API에는 `X-API-Key` header를 전달해야 합니다.
 
 ```bash
 curl -H "X-API-Key: change-me" \
@@ -243,9 +230,10 @@ python -m pytest
 
 ## 향후 개선 예정
 
-- FastAPI App 통합
-- SQLAlchemy Repository 통합
-- RTSP Camera Stream 지원
-- PostgreSQL 운영 환경 개선
+- Dashboard 실제 데이터 연결 (stats, camera count)
+- Events 페이지 필터 / 검색 UI
+- Snapshot 이미지 뷰어
+- 통계 차트 (시간별 이벤트, 타입별 분포)
+- RTSP / Webcam 실시간 스트림 지원
 - Alembic Migration 적용
 - 인증 및 권한 구조 개선

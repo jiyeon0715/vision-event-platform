@@ -48,3 +48,10 @@ weights/
 
 # Docker
 *.pid
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+frontend/.env.*.local
+frontend/out/

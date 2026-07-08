@@ -17,7 +17,6 @@ from app.pipeline.vision_event_pipeline import VisionEventPipeline
 from app.core.config import load_settings
 from app.database.urls import database_backend, redact_database_url
 from app.services.camera_health import camera_health_registry
-from storage.event_repository import EventRepository as SqliteEventRepository
 from vision.inputs.video_file_source import VideoFileSource
 
 DEFAULT_SNAPSHOT_DIR = Path("data/snapshots")
@@ -65,15 +64,19 @@ def parse_args() -> argparse.Namespace:
         "--database-url",
         default=os.environ.get("DATABASE_URL"),
         help=(
-            "SQLAlchemy database URL used with --save-events. Defaults to "
-            "DATABASE_URL when set; otherwise --db-path SQLite is used."
+            "SQLAlchemy database URL used with --save-events. "
+            "Defaults to DATABASE_URL env var when set; "
+            "otherwise a SQLite URL derived from --db-path is used."
         ),
     )
     parser.add_argument(
         "--db-path",
         type=Path,
         default=Path("data/events.db"),
-        help="SQLite database path used with --save-events when no database URL is set.",
+        help=(
+            "SQLite database path used with --save-events when --database-url "
+            "is not provided. Converted to a sqlite:/// URL automatically."
+        ),
     )
     parser.add_argument(
         "--snapshot-dir",
@@ -185,27 +188,24 @@ def _process_camera(
 
 
 def _build_event_repository(args: argparse.Namespace) -> Any:
-    if args.database_url:
-        from app.core.config import get_settings
-        from app.database.health import initialize_database
-        from app.database.session import create_session_factory
-        from app.repositories.event_repository import EventRepository
+    from app.core.config import get_settings
+    from app.database.health import initialize_database
+    from app.database.session import create_session_factory
+    from app.repositories.event_repository import EventRepository
 
-        settings = get_settings()
-        database_settings = replace(settings.database, url=args.database_url)
-        session_factory = create_session_factory(
-            replace(settings, database=database_settings)
-        )
-        initialize_database(bind_from_session_factory(session_factory))
-        print(
-            "Saving events to "
-            f"{database_backend(args.database_url)} ({redact_database_url(args.database_url)})",
-            file=sys.stderr,
-        )
-        return EventRepository(session_factory=session_factory)
-
-    print(f"Saving events to SQLite ({args.db_path})", file=sys.stderr)
-    return SqliteEventRepository(args.db_path)
+    database_url = args.database_url or f"sqlite:///{args.db_path}"
+    settings = get_settings()
+    database_settings = replace(settings.database, url=database_url)
+    session_factory = create_session_factory(
+        replace(settings, database=database_settings)
+    )
+    initialize_database(bind_from_session_factory(session_factory))
+    print(
+        "Saving events to "
+        f"{database_backend(database_url)} ({redact_database_url(database_url)})",
+        file=sys.stderr,
+    )
+    return EventRepository(session_factory=session_factory)
 
 
 def bind_from_session_factory(session_factory: Any) -> Any:
