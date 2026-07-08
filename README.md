@@ -146,6 +146,31 @@ http://localhost:8000/dashboard
 
 대시보드의 WebSocket은 저장된 이벤트를 주기적으로 확인해 새 이벤트를 화면에 반영합니다.
 
+### Next.js Frontend 실행
+
+Next.js 기반 Dashboard는 `frontend/` 디렉터리에 있습니다. FastAPI 기본 API(`main:app`)를 먼저 실행한 뒤 별도 터미널에서 프론트엔드를 실행합니다.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+브라우저에서 다음 주소를 엽니다.
+
+```text
+http://localhost:3000
+```
+
+기본 API 주소는 `http://localhost:8000`입니다. 다른 주소나 API key를 사용해야 하면 `frontend/.env.local`에 다음 값을 설정합니다.
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_API_KEY=change-me
+```
+
+현재 프론트엔드는 프로젝트 구조와 API 연동 기반을 우선하기 위해 shadcn/ui를 도입하지 않았습니다. Dashboard, Events, Cameras, Settings의 기본 라우트와 공통 Layout만 직접 구성했고, 컴포넌트 요구가 구체화되면 디자인 시스템 도입 여부를 다시 판단합니다.
+
 ### Docker Compose 실행
 
 Docker Compose는 `main:app`과 PostgreSQL을 함께 실행합니다.
