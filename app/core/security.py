@@ -8,6 +8,15 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 
 
 LOCAL_APP_ENVS = {"", "local", "dev", "development", "test"}
+DEFAULT_CORS_ORIGINS = ["http://localhost:3000"]
+
+
+def get_cors_origins() -> list[str]:
+    raw_origins = os.environ.get("CORS_ORIGINS", "").strip()
+    if not raw_origins:
+        return DEFAULT_CORS_ORIGINS
+
+    return [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
 
 
 def is_docs_enabled() -> bool:

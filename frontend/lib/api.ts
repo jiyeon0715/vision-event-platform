@@ -9,7 +9,10 @@ import type {
   VisionEvent,
 } from "@/types/api";
 
-const DEFAULT_API_BASE_URL = "http://localhost:8000";
+// Defaults to the same-origin "/api" prefix, which next.config.ts rewrites to the
+// backend. Set NEXT_PUBLIC_API_BASE_URL to call the backend directly instead
+// (requires CORS_ORIGINS on the backend to include the frontend's origin).
+const DEFAULT_API_BASE_URL = "/api";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ?? DEFAULT_API_BASE_URL;
@@ -29,15 +32,18 @@ class ApiError extends Error {
 }
 
 function buildUrl(path: string, params?: QueryParams) {
-  const url = new URL(`${API_BASE_URL}${path}`);
+  // Built as a plain string (not the URL API) so API_BASE_URL may be either an
+  // absolute origin or a relative prefix like "/api" resolved against the page.
+  const query = new URLSearchParams();
 
   Object.entries(params ?? {}).forEach(([key, value]) => {
     if (value !== undefined && value !== "") {
-      url.searchParams.set(key, String(value));
+      query.set(key, String(value));
     }
   });
 
-  return url;
+  const queryString = query.toString();
+  return `${API_BASE_URL}${path}${queryString ? `?${queryString}` : ""}`;
 }
 
 async function request<T>(
@@ -73,6 +79,10 @@ export function getCameras(params: ListCamerasParams = {}) {
 
 export function getEventTypes(params: ListEventTypesParams = {}) {
   return request<PaginatedResponse<EventType>>("/event-types", params as QueryParams);
+}
+
+export function getHealth() {
+  return request<{ status: string }>("/health");
 }
 
 export { ApiError };

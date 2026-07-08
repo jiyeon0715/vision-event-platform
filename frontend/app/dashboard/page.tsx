@@ -1,5 +1,6 @@
 import { ContentLayout } from "@/components/layout/content-layout";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { BackendStatus } from "@/components/dashboard/backend-status";
 
 const cards = [
   {
@@ -31,6 +32,7 @@ export default function DashboardPage() {
         {cards.map((card) => (
           <StatCard key={card.label} {...card} />
         ))}
+        <BackendStatus />
       </div>
     </ContentLayout>
   );
