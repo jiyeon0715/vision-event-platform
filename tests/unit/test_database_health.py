@@ -63,6 +63,25 @@ def test_initialize_database_adds_event_dashboard_filter_columns() -> None:
     assert {"severity", "status"}.issubset(columns)
 
 
+def test_initialize_database_seeds_minimal_event_types() -> None:
+    engine = create_engine("sqlite:///:memory:")
+
+    initialize_database(engine)
+
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text("SELECT key, default_severity FROM event_types ORDER BY key")
+        ).all()
+
+    assert rows == [
+        ("custom_event", "info"),
+        ("object_detected", "info"),
+        ("person_detected", "info"),
+        ("vehicle_detected", "info"),
+        ("zone_entered", "warning"),
+    ]
+
+
 def test_database_health_endpoint_returns_status(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.database.health.check_database_health",

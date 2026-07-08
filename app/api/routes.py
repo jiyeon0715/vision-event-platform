@@ -10,6 +10,12 @@ from app.schemas.cameras import (
     CameraUpdate,
 )
 from app.core.security import require_api_key
+from app.schemas.event_types import (
+    EventTypeCreate,
+    EventTypeListResponse,
+    EventTypeResponse,
+    EventTypeUpdate,
+)
 from app.schemas.events import EventListResponse, EventResponse, EventStatsResponse
 from app.schemas.health import CameraHealthResponse
 from app.services.camera_health import camera_health_registry
@@ -77,6 +83,35 @@ class CameraReaderWriter(Protocol):
         ...
 
 
+class EventTypeReaderWriter(Protocol):
+    def create(self, event_type: EventTypeCreate) -> object:
+        ...
+
+    def list_event_types(
+        self,
+        page: int = 1,
+        limit: int = 100,
+        is_active: bool | None = None,
+    ) -> dict[str, object]:
+        ...
+
+    def get_by_id(self, event_type_id: int) -> object | None:
+        ...
+
+    def get_by_key(self, key: str) -> object | None:
+        ...
+
+    def update(
+        self,
+        event_type_id: int,
+        event_type: EventTypeUpdate,
+    ) -> object | None:
+        ...
+
+    def deactivate(self, event_type_id: int) -> object | None:
+        ...
+
+
 @router.get("/health", tags=["health"])
 async def health_check() -> dict[str, str]:
     """Return a simple service health response."""
@@ -107,6 +142,129 @@ def get_camera_repository() -> CameraReaderWriter:
     from app.repositories.camera_repository import CameraRepository
 
     return CameraRepository()
+
+
+def get_event_type_repository() -> EventTypeReaderWriter:
+    from app.repositories.event_type_repository import EventTypeRepository
+
+    return EventTypeRepository()
+
+
+@router.get(
+    "/event-types",
+    response_model=EventTypeListResponse,
+    tags=["event-types"],
+    dependencies=[Depends(require_api_key)],
+)
+async def list_event_types(
+    repository: Annotated[EventTypeReaderWriter, Depends(get_event_type_repository)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    is_active: bool | None = None,
+) -> dict[str, object]:
+    """Return paginated managed AI vision event types."""
+    result = repository.list_event_types(
+        page=page,
+        limit=limit,
+        is_active=is_active,
+    )
+    total = int(result["total"])
+    return {
+        "items": result["items"],
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "total_pages": (total + limit - 1) // limit,
+    }
+
+
+@router.post(
+    "/event-types",
+    response_model=EventTypeResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["event-types"],
+    dependencies=[Depends(require_api_key)],
+)
+async def create_event_type(
+    event_type: EventTypeCreate,
+    repository: Annotated[EventTypeReaderWriter, Depends(get_event_type_repository)],
+) -> object:
+    """Create managed AI vision event type metadata."""
+    if repository.get_by_key(event_type.key) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Event type key already exists",
+        )
+    return repository.create(event_type)
+
+
+@router.get(
+    "/event-types/{event_type_id}",
+    response_model=EventTypeResponse,
+    tags=["event-types"],
+    dependencies=[Depends(require_api_key)],
+)
+async def get_event_type(
+    event_type_id: int,
+    repository: Annotated[EventTypeReaderWriter, Depends(get_event_type_repository)],
+) -> object:
+    """Return one managed AI vision event type by id."""
+    event_type = repository.get_by_id(event_type_id)
+    if event_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event type not found",
+        )
+    return event_type
+
+
+@router.patch(
+    "/event-types/{event_type_id}",
+    response_model=EventTypeResponse,
+    tags=["event-types"],
+    dependencies=[Depends(require_api_key)],
+)
+async def update_event_type(
+    event_type_id: int,
+    event_type: EventTypeUpdate,
+    repository: Annotated[EventTypeReaderWriter, Depends(get_event_type_repository)],
+) -> object:
+    """Update managed AI vision event type metadata."""
+    if event_type.key is not None:
+        existing = repository.get_by_key(event_type.key)
+        if existing is not None and getattr(existing, "id", None) != event_type_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Event type key already exists",
+            )
+
+    updated = repository.update(event_type_id, event_type)
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event type not found",
+        )
+    return updated
+
+
+@router.delete(
+    "/event-types/{event_type_id}",
+    response_model=EventTypeResponse,
+    tags=["event-types"],
+    dependencies=[Depends(require_api_key)],
+)
+async def deactivate_event_type(
+    event_type_id: int,
+    repository: Annotated[EventTypeReaderWriter, Depends(get_event_type_repository)],
+) -> object:
+    """Mark managed AI vision event type metadata inactive."""
+    event_type = repository.deactivate(event_type_id)
+    if event_type is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Event type not found",
+        )
+    return event_type
 
 
 @router.get(
